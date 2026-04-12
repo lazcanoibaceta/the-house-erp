@@ -1,24 +1,88 @@
-import Link from 'next/link'
-
 export default function Home() {
-  return (
-    <main className="min-h-screen bg-gray-100 p-6">
-      <h1 className="text-3xl font-bold text-gray-800 mb-2">The House ERP</h1>
-      <p className="text-gray-500 mb-8">Panel de administración</p>
+  const kpis = [
+    {
+      label: 'Food Cost',
+      value: '-',
+      unit: '%',
+      meta: 'Meta 28–32%',
+      color: 'text-yellow-400',
+    },
+    {
+      label: 'Labor Cost',
+      value: '-',
+      unit: '%',
+      meta: 'Meta 25–30%',
+      color: 'text-blue-400',
+    },
+    {
+      label: 'Prime Cost',
+      value: '-',
+      unit: '%',
+      meta: 'Meta <60%',
+      color: 'text-purple-400',
+    },
+    {
+      label: 'Ticket Promedio',
+      value: '-',
+      unit: '',
+      meta: 'Por pedido',
+      color: 'text-green-400',
+    },
+    {
+      label: 'Descuentos',
+      value: '9,6',
+      unit: '%',
+      meta: 'Meta bajar a 6%',
+      color: 'text-red-400',
+    },
+    {
+      label: 'Retención 60 días',
+      value: '-',
+      unit: '%',
+      meta: 'Clientes que repiten',
+      color: 'text-orange-400',
+    },
+  ]
 
-      <div className="grid grid-cols-1 gap-4">
-        <Link href="/inventario">
-          <div className="bg-white rounded-2xl p-6 shadow hover:shadow-md transition cursor-pointer">
-            <h2 className="text-xl font-semibold text-gray-700">📦 Inventario</h2>
-            <p className="text-gray-400 text-sm mt-1">Gestión de insumos y stock</p>
-          </div>
-        </Link>
-        <Link href="/compras">
-  <div className="bg-white rounded-2xl p-6 shadow hover:shadow-md transition cursor-pointer">
-    <h2 className="text-xl font-semibold text-gray-700">🛒 Compras</h2>
-    <p className="text-gray-400 text-sm mt-1">Registro de compras a proveedores</p>
-  </div>
-</Link>
+  return (
+    <main className="min-h-screen bg-gray-950 p-4 md:p-8">
+      <div className="max-w-4xl mx-auto">
+
+        <div className="mb-8">
+          <h1 className="text-2xl font-bold text-white">Panel principal</h1>
+          <p className="text-gray-500 text-sm mt-1">Resumen del negocio</p>
+        </div>
+
+        {/* KPIs */}
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-10">
+          {kpis.map(kpi => (
+            <div key={kpi.label} className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
+              <p className="text-gray-400 text-xs uppercase tracking-wide mb-2">{kpi.label}</p>
+              <p className={`text-3xl font-bold ${kpi.color}`}>
+                {kpi.value}{kpi.unit && <span className="text-lg ml-1">{kpi.unit}</span>}
+              </p>
+              <p className="text-gray-600 text-xs mt-2">{kpi.meta}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* Módulos */}
+        <h2 className="text-gray-400 text-sm uppercase tracking-wide mb-4">Módulos</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <a href="/inventario" className="bg-gray-900 rounded-2xl p-6 border border-gray-800 hover:border-orange-500 transition">
+            <p className="text-white font-semibold">📦 Inventario</p>
+            <p className="text-gray-500 text-sm mt-1">Gestión de insumos y stock</p>
+          </a>
+          <a href="/compras" className="bg-gray-900 rounded-2xl p-6 border border-gray-800 hover:border-orange-500 transition">
+            <p className="text-white font-semibold">🛒 Compras</p>
+            <p className="text-gray-500 text-sm mt-1">Registro de compras a proveedores</p>
+          </a>
+          <a href="/inventario/conteo" className="bg-gray-900 rounded-2xl p-6 border border-gray-800 hover:border-orange-500 transition">
+            <p className="text-white font-semibold">📋 Conteo</p>
+            <p className="text-gray-500 text-sm mt-1">Conteo físico de inventario</p>
+          </a>
+        </div>
+
       </div>
     </main>
   )
