@@ -10,6 +10,8 @@ const links = [
   { href: '/inventario', label: 'Inventario' },
   { href: '/compras', label: 'Compras' },
   { href: '/inventario/conteo', label: 'Conteo' },
+  { href: '/inventario/costeo', label: 'Costeo' },
+  { href: '/inventario/conteos', label: 'historial' },
 ]
 
 export default function Navbar() {
