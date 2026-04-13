@@ -2,9 +2,12 @@
 
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase'
+import { useLocation } from '@/hooks/useLocation'
+
 const supabase = createClient()
 
 export default function Conteo() {
+  const { locationCode, locationId, loading: locationLoading } = useLocation()
   const [insumos, setInsumos] = useState([])
   const [counts, setCounts] = useState({})
   const [date, setDate] = useState(new Date().toISOString().split('T')[0])
@@ -30,7 +33,7 @@ export default function Conteo() {
 
     const { data: count, error } = await supabase
       .from('inventory_counts')
-      .insert({ date, notes })
+      .insert({ date, notes, location_id: locationId })
       .select()
       .single()
 
@@ -70,9 +73,14 @@ export default function Conteo() {
     <main className="min-h-screen bg-gray-950 p-4 md:p-8">
       <div className="max-w-2xl mx-auto">
 
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-white">📋 Conteo de Inventario</h1>
-          <p className="text-gray-500 text-sm mt-1">Ingresa solo los insumos que contaste. Los demás no se modifican.</p>
+        <div className="mb-6 flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-white">📋 Conteo de Inventario</h1>
+            <p className="text-gray-500 text-sm mt-1">Ingresa solo los insumos que contaste. Los demás no se modifican.</p>
+          </div>
+          <span className="bg-orange-500 text-white text-sm font-bold px-3 py-1 rounded-lg">
+            {locationCode}
+          </span>
         </div>
 
         {success && (
@@ -128,7 +136,7 @@ export default function Conteo() {
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || locationLoading}
             className="bg-orange-500 hover:bg-orange-600 text-white rounded-xl p-3 font-semibold transition disabled:opacity-50"
           >
             {loading ? 'Guardando...' : 'Guardar conteo'}

@@ -1,4 +1,11 @@
+'use client'
+
+import { useLocation } from '@/hooks/useLocation'
+import Link from 'next/link'
+
 export default function Home() {
+  const { locationCode } = useLocation()
+
   const kpis = [
     {
       label: 'Food Cost',
@@ -48,9 +55,14 @@ export default function Home() {
     <main className="min-h-screen bg-gray-950 p-4 md:p-8">
       <div className="max-w-4xl mx-auto">
 
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold text-white">Panel principal</h1>
-          <p className="text-gray-500 text-sm mt-1">Resumen del negocio</p>
+        <div className="mb-8 flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-white">Panel principal</h1>
+            <p className="text-gray-500 text-sm mt-1">Resumen del negocio</p>
+          </div>
+          <span className="bg-orange-500 text-white text-sm font-bold px-3 py-1 rounded-lg">
+            {locationCode}
+          </span>
         </div>
 
         {/* KPIs */}
@@ -69,18 +81,22 @@ export default function Home() {
         {/* Módulos */}
         <h2 className="text-gray-400 text-sm uppercase tracking-wide mb-4">Módulos</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <a href="/inventario" className="bg-gray-900 rounded-2xl p-6 border border-gray-800 hover:border-orange-500 transition">
+          <Link href="/inventario" className="bg-gray-900 rounded-2xl p-6 border border-gray-800 hover:border-orange-500 transition">
             <p className="text-white font-semibold">📦 Inventario</p>
             <p className="text-gray-500 text-sm mt-1">Gestión de insumos y stock</p>
-          </a>
-          <a href="/compras" className="bg-gray-900 rounded-2xl p-6 border border-gray-800 hover:border-orange-500 transition">
+          </Link>
+          <Link href="/compras" className="bg-gray-900 rounded-2xl p-6 border border-gray-800 hover:border-orange-500 transition">
             <p className="text-white font-semibold">🛒 Compras</p>
             <p className="text-gray-500 text-sm mt-1">Registro de compras a proveedores</p>
-          </a>
-          <a href="/inventario/conteo" className="bg-gray-900 rounded-2xl p-6 border border-gray-800 hover:border-orange-500 transition">
+          </Link>
+          <Link href="/inventario/conteo" className="bg-gray-900 rounded-2xl p-6 border border-gray-800 hover:border-orange-500 transition">
             <p className="text-white font-semibold">📋 Conteo</p>
             <p className="text-gray-500 text-sm mt-1">Conteo físico de inventario</p>
-          </a>
+          </Link>
+          <Link href="/ventas" className="bg-gray-900 rounded-2xl p-6 border border-gray-800 hover:border-orange-500 transition">
+            <p className="text-white font-semibold">📊 Ventas</p>
+            <p className="text-gray-500 text-sm mt-1">Importar y analizar ventas</p>
+          </Link>
         </div>
 
       </div>

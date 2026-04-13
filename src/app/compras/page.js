@@ -2,9 +2,12 @@
 
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase'
+import { useLocation } from '@/hooks/useLocation'
+
 const supabase = createClient()
 
 export default function Compras() {
+  const { locationCode, locationId, loading: locationLoading } = useLocation()
   const [suppliers, setSuppliers] = useState([])
   const [insumos, setInsumos] = useState([])
   const [supplierId, setSupplierId] = useState('')
@@ -15,13 +18,28 @@ export default function Compras() {
 
   useEffect(() => {
     async function fetchData() {
-      const { data: s } = await supabase.from('suppliers').select('*').order('name')
+      // Insumos: catálogo compartido, sin filtro
       const { data: i } = await supabase.from('insumos').select('*').order('name')
-      setSuppliers(s || [])
       setInsumos(i || [])
     }
     fetchData()
   }, [])
+
+  // Proveedores: filtrar por local seleccionado
+  useEffect(() => {
+    if (!locationId) return
+    async function fetchSuppliers() {
+      const { data } = await supabase
+        .from('supplier_locations')
+        .select('supplier_id, suppliers(id, name)')
+        .eq('location_id', locationId)
+      const list = (data || []).map(row => row.suppliers).filter(Boolean)
+      list.sort((a, b) => a.name.localeCompare(b.name))
+      setSuppliers(list)
+      setSupplierId('')
+    }
+    fetchSuppliers()
+  }, [locationId])
 
   function addItem() {
     setItems([...items, { insumo_id: '', quantity: '', total_price: '' }])
@@ -38,9 +56,7 @@ export default function Compras() {
   }
 
   function getTotal() {
-    return items.reduce((sum, item) => {
-      return sum + (parseFloat(item.total_price) || 0)
-    }, 0)
+    return items.reduce((sum, item) => sum + (parseFloat(item.total_price) || 0), 0)
   }
 
   async function handleSubmit(e) {
@@ -49,16 +65,11 @@ export default function Compras() {
 
     const total = getTotal()
 
-    console.log('enviando fecha:', date)
-
     const { data: purchase, error: purchaseError } = await supabase
       .from('purchases')
-      .insert({ supplier_id: supplierId, date:date, total:total })
+      .insert({ supplier_id: supplierId, date, total, location_id: locationId })
       .select()
       .single()
-
-      console.log('purchase result:', purchase)
-      console.log('purchase error:', purchaseError)
 
     if (purchaseError) {
       console.error(purchaseError)
@@ -71,7 +82,7 @@ export default function Compras() {
 
       const qty = parseFloat(item.quantity)
       const totalPrice = parseFloat(item.total_price)
-      const price = totalPrice / qty // precio por unidad calculado
+      const price = totalPrice / qty
 
       await supabase.from('purchase_items').insert({
         purchase_id: purchase.id,
@@ -88,7 +99,6 @@ export default function Compras() {
 
       const currentStock = parseFloat(insumo.stock) || 0
       const currentCost = parseFloat(insumo.avg_cost) || 0
-
       const newStock = currentStock + qty
       const newAvgCost = ((currentStock * currentCost) + (qty * price)) / newStock
 
@@ -102,6 +112,7 @@ export default function Compras() {
         type: 'entrada',
         quantity: qty,
         reason: 'Compra a proveedor',
+        location_id: locationId,
       })
     }
 
@@ -116,8 +127,11 @@ export default function Compras() {
     <main className="min-h-screen bg-gray-950 p-4 md:p-8">
       <div className="max-w-2xl mx-auto">
 
-        <div className="mb-6">
+        <div className="mb-6 flex items-center justify-between">
           <h1 className="text-2xl font-bold text-white">🛒 Registrar Compra</h1>
+          <span className="bg-orange-500 text-white text-sm font-bold px-3 py-1 rounded-lg">
+            {locationCode}
+          </span>
         </div>
 
         {success && (
@@ -133,6 +147,7 @@ export default function Compras() {
               value={supplierId}
               onChange={(e) => setSupplierId(e.target.value)}
               required
+              disabled={locationLoading}
               className="bg-gray-800 border border-gray-700 rounded-lg p-2 text-white"
             >
               <option value="">Seleccionar proveedor...</option>
@@ -222,7 +237,7 @@ export default function Compras() {
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || locationLoading}
             className="bg-orange-500 hover:bg-orange-600 text-white rounded-xl p-3 font-semibold transition disabled:opacity-50"
           >
             {loading ? 'Guardando...' : 'Registrar compra'}

@@ -2,65 +2,72 @@
 
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase'
+import { useLocation } from '@/hooks/useLocation'
+
 const supabase = createClient()
 
 export default function Costeo() {
+  const { locationCode, locationId, loading: locationLoading } = useLocation()
   const [productos, setProductos] = useState([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    if (!locationId) return
     fetchCosteo()
-  }, [])
+  }, [locationId])
 
   async function fetchCosteo() {
-  const { data: products } = await supabase
-    .from('products')
-    .select('*')
-    .order('name')
+    setLoading(true)
 
-  const { data: recipes } = await supabase
-    .from('recipes')
-    .select('product_id, quantity, insumo_id')
+    const { data: products } = await supabase
+      .from('products')
+      .select('*')
+      .order('name')
 
-  // Para cada insumo único en las recetas, calcular avg de últimas 5 compras
-  const insumoIds = [...new Set(recipes.map(r => r.insumo_id))]
+    const { data: recipes } = await supabase
+      .from('recipes')
+      .select('product_id, quantity, insumo_id')
 
-  const costosPorInsumo = {}
+    const insumoIds = [...new Set(recipes.map(r => r.insumo_id))]
+    const costosPorInsumo = {}
 
-  for (const insumoId of insumoIds) {
-    const { data: ultimas } = await supabase
-      .from('purchase_items')
-      .select('unit_price, quantity')
-      .eq('insumo_id', insumoId)
-      .order('created_at', { ascending: false })
-      .limit(5)
+    for (const insumoId of insumoIds) {
+      // Filtrar purchase_items por location_id a través de purchases
+      const { data: ultimas } = await supabase
+        .from('purchase_items')
+        .select('unit_price, quantity, purchases!inner(location_id)')
+        .eq('insumo_id', insumoId)
+        .eq('purchases.location_id', locationId)
+        .order('created_at', { ascending: false })
+        .limit(5)
 
-    if (ultimas && ultimas.length > 0) {
-      const totalQty = ultimas.reduce((sum, i) => sum + parseFloat(i.quantity), 0)
-      const totalCosto = ultimas.reduce((sum, i) => sum + parseFloat(i.quantity) * parseFloat(i.unit_price), 0)
-      costosPorInsumo[insumoId] = totalQty > 0 ? totalCosto / totalQty : 0
-    } else {
-      costosPorInsumo[insumoId] = 0
+      if (ultimas && ultimas.length > 0) {
+        const totalQty = ultimas.reduce((sum, i) => sum + parseFloat(i.quantity), 0)
+        const totalCosto = ultimas.reduce((sum, i) => sum + parseFloat(i.quantity) * parseFloat(i.unit_price), 0)
+        costosPorInsumo[insumoId] = totalQty > 0 ? totalCosto / totalQty : 0
+      } else {
+        costosPorInsumo[insumoId] = 0
+      }
     }
+
+    const resultado = products.map(product => {
+      const ingredientes = recipes.filter(r => r.product_id === product.id)
+      const costo = ingredientes.reduce((sum, r) => {
+        const avgCost = costosPorInsumo[r.insumo_id] || 0
+        return sum + (r.quantity * avgCost)
+      }, 0)
+
+      const precio = parseFloat(product.sale_price) || 0
+      const margen = precio > 0 ? ((precio - costo) / precio) * 100 : 0
+      const foodCost = precio > 0 ? (costo / precio) * 100 : 0
+
+      return { ...product, costo_calculado: costo, margen, foodCost }
+    })
+
+    setProductos(resultado)
+    setLoading(false)
   }
 
-  const resultado = products.map(product => {
-    const ingredientes = recipes.filter(r => r.product_id === product.id)
-    const costo = ingredientes.reduce((sum, r) => {
-      const avgCost = costosPorInsumo[r.insumo_id] || 0
-      return sum + (r.quantity * avgCost)
-    }, 0)
-
-    const precio = parseFloat(product.sale_price) || 0
-    const margen = precio > 0 ? ((precio - costo) / precio) * 100 : 0
-    const foodCost = precio > 0 ? (costo / precio) * 100 : 0
-
-    return { ...product, costo_calculado: costo, margen, foodCost }
-  })
-
-  setProductos(resultado)
-  setLoading(false)
-}
   function colorMargen(margen) {
     if (margen >= 70) return 'text-green-400'
     if (margen >= 60) return 'text-yellow-400'
@@ -81,9 +88,16 @@ export default function Costeo() {
     <main className="min-h-screen bg-gray-950 p-4 md:p-8">
       <div className="max-w-4xl mx-auto">
 
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-white">💰 Costeo y Margen</h1>
-          <p className="text-gray-500 text-sm mt-1">Basado en costo promedio ponderado de insumos</p>
+        <div className="mb-6 flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-white">💰 Costeo y Margen</h1>
+            <p className="text-gray-500 text-sm mt-1">
+              Basado en últimas 5 compras de {locationCode}
+            </p>
+          </div>
+          <span className="bg-orange-500 text-white text-sm font-bold px-3 py-1 rounded-lg">
+            {locationCode}
+          </span>
         </div>
 
         {/* Resumen */}
@@ -109,7 +123,7 @@ export default function Costeo() {
         </div>
 
         {/* Tabla */}
-        {loading ? (
+        {loading || locationLoading ? (
           <p className="text-gray-500">Cargando...</p>
         ) : (
           <div className="bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden">
