@@ -12,7 +12,7 @@ const links = [
   { href: '/inventario/conteo', label: 'Conteo' },
   { href: '/inventario/costeo', label: 'Costeo' },
   { href: '/inventario/conteos', label: 'Historial' },
-  { href: '/conversor', label: '🍔 Conversor' },
+  { href: '/ventas', label: 'Ventas' },
 ]
 
 export default function Navbar() {
