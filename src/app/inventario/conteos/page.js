@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase'
+import { useLocation } from '@/hooks/useLocation'
 const supabase = createClient()
 
 export default function HistorialConteos() {
+  const { locationCode, locationId, loading: locationLoading } = useLocation()
   const [conteos, setConteos] = useState([])
   const [conteoSeleccionado, setConteoSeleccionado] = useState(null)
   const [items, setItems] = useState([])
@@ -12,13 +14,15 @@ export default function HistorialConteos() {
   const [loadingItems, setLoadingItems] = useState(false)
 
   useEffect(() => {
+    if (!locationId) return
     fetchConteos()
-  }, [])
+  }, [locationId])
 
   async function fetchConteos() {
     const { data } = await supabase
       .from('inventory_counts')
       .select('*')
+      .eq('location_id', locationId)
       .order('date', { ascending: false })
     setConteos(data || [])
     setLoading(false)
@@ -54,12 +58,17 @@ export default function HistorialConteos() {
     <main className="min-h-screen bg-gray-950 p-4 md:p-8">
       <div className="max-w-2xl mx-auto">
 
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-white">📋 Historial de Conteos</h1>
-          <p className="text-gray-500 text-sm mt-1">Registro de todos los conteos realizados</p>
+        <div className="mb-6 flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-white">📋 Historial de Conteos</h1>
+            <p className="text-gray-500 text-sm mt-1">Conteos de {locationCode}</p>
+          </div>
+          <span className="bg-orange-500 text-white text-sm font-bold px-3 py-1 rounded-lg">
+            {locationCode}
+          </span>
         </div>
 
-        {loading ? (
+        {loading || locationLoading ? (
           <p className="text-gray-500">Cargando...</p>
         ) : conteos.length === 0 ? (
           <p className="text-gray-500">No hay conteos registrados todavía.</p>
