@@ -15,6 +15,7 @@ export default function NuevoGasto() {
   const [categorias, setCategorias] = useState([])
   const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState(false)
+  const [errorMsg, setErrorMsg] = useState('')
 
   // Campos del formulario
   const [categoryId, setCategoryId] = useState('')
@@ -58,7 +59,13 @@ export default function NuevoGasto() {
 
   async function handleSubmit(e) {
     e.preventDefault()
-    if (!locationId) return
+    setErrorMsg('')
+
+    if (!locationId) {
+      setErrorMsg('Debes seleccionar un local específico (SF o LA) para registrar gastos.')
+      return
+    }
+
     setLoading(true)
 
     const { error } = await supabase.from('operating_expenses').insert({
@@ -78,6 +85,7 @@ export default function NuevoGasto() {
 
     if (error) {
       console.error(error)
+      setErrorMsg('Error al guardar: ' + error.message)
       setLoading(false)
       return
     }
@@ -106,6 +114,12 @@ export default function NuevoGasto() {
         {success && (
           <div className="bg-green-900 text-green-300 rounded-xl p-3 mb-4 font-semibold">
             ✅ Gasto registrado — redirigiendo...
+          </div>
+        )}
+
+        {errorMsg && (
+          <div className="bg-red-950 border border-red-800 text-red-400 rounded-xl p-3 mb-4 text-sm">
+            ⚠️ {errorMsg}
           </div>
         )}
 

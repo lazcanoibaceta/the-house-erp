@@ -31,15 +31,20 @@ export default function Gastos() {
   }, [])
 
   useEffect(() => {
-    if (!locationId) return
+    if (locationLoading) return
+    if (!locationId) {
+      setLoading(false)
+      return
+    }
     fetchGastos()
-  }, [locationId, mes, anio, categoriaFiltro])
+  }, [locationId, locationLoading, mes, anio, categoriaFiltro])
 
   async function fetchGastos() {
     setLoading(true)
 
     const desde = `${anio}-${String(mes).padStart(2, '0')}-01`
-    const hasta = `${anio}-${String(mes).padStart(2, '0')}-31`
+    const lastDay = new Date(anio, mes, 0).getDate()
+    const hasta = `${anio}-${String(mes).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
 
     let query = supabase
       .from('operating_expenses')
@@ -166,6 +171,11 @@ export default function Gastos() {
         {/* Lista de gastos */}
         {loading || locationLoading ? (
           <p className="text-gray-500">Cargando...</p>
+        ) : !locationId ? (
+          <div className="bg-yellow-950 border border-yellow-800 rounded-2xl p-4 text-center">
+            <p className="text-yellow-400 font-semibold">⚠️ Selecciona un local específico</p>
+            <p className="text-yellow-600 text-sm mt-1">Los gastos se registran por local. Elige SF o LA en el menú de arriba.</p>
+          </div>
         ) : gastos.length === 0 ? (
           <div className="text-center py-12">
             <p className="text-gray-600">No hay gastos registrados para este período.</p>
