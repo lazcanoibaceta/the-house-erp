@@ -111,7 +111,21 @@ export default function Ventas() {
       }
     }
 
-    setData({ periodo: combined, canales: canalesCombinados, dias: diasCombinados, productos: productosUnicos })
+    // Liquidaciones PedidosYa del mes
+    let settlementsQuery = supabase
+      .from('platform_settlements')
+      .select('*')
+      .eq('platform', 'pedidosya')
+      .gte('period_start', mesKey + '-01')
+      .lte('period_start', mesKey + '-31')
+      .order('period_start')
+
+    if (loc !== 'AMBOS') {
+      settlementsQuery = settlementsQuery.eq('location_id', locationMap[loc])
+    }
+    const { data: settlements } = await settlementsQuery
+
+    setData({ periodo: combined, canales: canalesCombinados, dias: diasCombinados, productos: productosUnicos, settlements: settlements || [] })
     setLoading(false)
   }
 
@@ -260,6 +274,82 @@ export default function Ventas() {
                 </div>
               </div>
             )}
+
+            {/* Liquidaciones PedidosYa */}
+            {data.settlements && data.settlements.length > 0 && (() => {
+              // Agrupar por semana (period_start + period_end), sumando SF y LA si es AMBOS
+              const semanaMap = {}
+              for (const s of data.settlements) {
+                const key = s.period_start + '_' + s.period_end
+                if (!semanaMap[key]) semanaMap[key] = { period_start: s.period_start, period_end: s.period_end, gross: 0, commission: 0, plus: 0, net: 0, settled: 0, orders: 0 }
+                semanaMap[key].gross      += s.gross_sales || 0
+                semanaMap[key].commission += s.commission || 0
+                semanaMap[key].plus       += s.plus_charges || 0
+                semanaMap[key].net        += s.net_sales || 0
+                semanaMap[key].settled    += s.total_settled || 0
+                semanaMap[key].orders     += s.orders_count || 0
+              }
+              const semanas = Object.values(semanaMap).sort((a, b) => a.period_start.localeCompare(b.period_start))
+              const totalGross      = semanas.reduce((s, w) => s + w.gross, 0)
+              const totalCommission = semanas.reduce((s, w) => s + w.commission + w.plus, 0)
+              const totalSettled    = semanas.reduce((s, w) => s + (w.settled || (w.net - w.commission - w.plus)), 0)
+              const pctComision     = totalGross > 0 ? ((totalCommission / totalGross) * 100).toFixed(1) : 0
+
+              return (
+                <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
+                  <div className="flex items-center gap-2 mb-4">
+                    <h3 className="text-white font-semibold">Liquidaciones PedidosYa</h3>
+                    <span className="text-xs bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded font-medium">🛵 PeYa</span>
+                  </div>
+
+                  {/* Resumen del mes */}
+                  <div className="grid grid-cols-3 gap-3 mb-4">
+                    <div className="bg-gray-800 rounded-xl p-3">
+                      <p className="text-gray-400 text-xs mb-1">Ventas brutas</p>
+                      <p className="text-white font-bold">${totalGross.toLocaleString('es-CL')}</p>
+                      <p className="text-gray-500 text-xs mt-1">Lo que pagaron clientes</p>
+                    </div>
+                    <div className="bg-gray-800 rounded-xl p-3">
+                      <p className="text-gray-400 text-xs mb-1">Cobros PeYa</p>
+                      <p className="text-red-400 font-bold">-${totalCommission.toLocaleString('es-CL')}</p>
+                      <p className="text-gray-500 text-xs mt-1">{pctComision}% efectivo</p>
+                    </div>
+                    <div className="bg-gray-800 rounded-xl p-3">
+                      <p className="text-gray-400 text-xs mb-1">Neto recibido</p>
+                      <p className="text-green-400 font-bold">${totalSettled.toLocaleString('es-CL')}</p>
+                      <p className="text-gray-500 text-xs mt-1">Lo que te depositan</p>
+                    </div>
+                  </div>
+
+                  {/* Detalle por semana */}
+                  <p className="text-gray-500 text-xs uppercase tracking-wide mb-2">Por semana</p>
+                  <div className="flex flex-col gap-1">
+                    {semanas.map((s, i) => {
+                      const cobros = s.commission + s.plus
+                      const neto   = s.settled || (s.net - cobros)
+                      const pct    = s.gross > 0 ? ((cobros / s.gross) * 100).toFixed(1) : 0
+                      return (
+                        <div key={i} className="flex justify-between items-center py-2 border-b border-gray-800 last:border-0 text-sm">
+                          <div>
+                            <span className="text-gray-300">
+                              {new Date(s.period_start + 'T12:00:00').toLocaleDateString('es-CL', { day: 'numeric', month: 'short' })}
+                              {' – '}
+                              {new Date(s.period_end + 'T12:00:00').toLocaleDateString('es-CL', { day: 'numeric', month: 'short' })}
+                            </span>
+                            <span className="text-gray-600 text-xs ml-2">{s.orders} órdenes</span>
+                          </div>
+                          <div className="flex gap-4 items-center">
+                            <span className="text-gray-500 text-xs">${s.gross.toLocaleString('es-CL')}</span>
+                            <span className="text-red-400 text-xs">-${cobros.toLocaleString('es-CL')} <span className="text-gray-600">({pct}%)</span></span>
+                            <span className="text-green-400 font-semibold">${neto.toLocaleString('es-CL')}</span>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })()}
 
             {/* Descuentos */}
             <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
