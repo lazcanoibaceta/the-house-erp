@@ -60,12 +60,26 @@ export default function Inventario() {
           </span>
         </div>
 
-        <Link href="/inventario/conteo">
-          <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 hover:border-orange-500 transition cursor-pointer mb-6">
-            <h2 className="font-semibold text-white">📋 Hacer conteo de inventario</h2>
-            <p className="text-gray-500 text-sm mt-1">Registra el stock actual de tus insumos</p>
-          </div>
-        </Link>
+        <div className="flex flex-col gap-3 mb-6">
+          <Link href="/inventario/conteo">
+            <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 hover:border-orange-500 transition cursor-pointer">
+              <h2 className="font-semibold text-white">📋 Hacer conteo de inventario</h2>
+              <p className="text-gray-500 text-sm mt-1">Registra el stock actual de tus insumos</p>
+            </div>
+          </Link>
+          <Link href="/inventario/conteos">
+            <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 hover:border-orange-500 transition cursor-pointer">
+              <h2 className="font-semibold text-white">🗂️ Historial de conteos</h2>
+              <p className="text-gray-500 text-sm mt-1">Ver y editar conteos anteriores</p>
+            </div>
+          </Link>
+          <Link href="/inventario/recetas">
+            <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 hover:border-orange-500 transition cursor-pointer">
+              <h2 className="font-semibold text-white">🍔 Editar recetas</h2>
+              <p className="text-gray-500 text-sm mt-1">Corrige los gramajes e insumos de cada producto</p>
+            </div>
+          </Link>
+        </div>
 
         {/* Alerta stock bajo */}
         {insumosStockBajo.length > 0 && (

@@ -11,6 +11,7 @@ export default function Conteo() {
   const [insumos, setInsumos] = useState([])
   const [counts, setCounts] = useState({})
   const [date, setDate] = useState(new Date().toISOString().split('T')[0])
+  const [countType, setCountType] = useState('cierre_mes')
   const [notes, setNotes] = useState('')
   const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState(false)
@@ -33,7 +34,7 @@ export default function Conteo() {
 
     const { data: count, error } = await supabase
       .from('inventory_counts')
-      .insert({ date, notes, location_id: locationId })
+      .insert({ date, notes, location_id: locationId, count_type: countType })
       .select()
       .single()
 
@@ -92,16 +93,32 @@ export default function Conteo() {
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
 
           <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 flex flex-col gap-3">
-            <input
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              required
-              className="bg-gray-800 border border-gray-700 rounded-lg p-2 text-white"
-            />
+            <div className="flex gap-3">
+              <div className="flex-1">
+                <label className="text-gray-400 text-xs mb-1 block">Fecha</label>
+                <input
+                  type="date"
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                  required
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white"
+                />
+              </div>
+              <div className="flex-1">
+                <label className="text-gray-400 text-xs mb-1 block">Tipo de conteo</label>
+                <select
+                  value={countType}
+                  onChange={(e) => setCountType(e.target.value)}
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white text-sm"
+                >
+                  <option value="cierre_mes">Cierre de mes</option>
+                  <option value="seguimiento">Seguimiento</option>
+                </select>
+              </div>
+            </div>
             <input
               type="text"
-              placeholder="Notas (opcional, ej: conteo semanal)"
+              placeholder="Notas (opcional)"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               className="bg-gray-800 border border-gray-700 rounded-lg p-2 text-white placeholder-gray-500"

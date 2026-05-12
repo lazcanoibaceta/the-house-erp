@@ -12,6 +12,7 @@ export default function HistorialConteos() {
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [loadingItems, setLoadingItems] = useState(false)
+  const [savingType, setSavingType] = useState(false)
 
   useEffect(() => {
     if (!locationId) return
@@ -42,6 +43,22 @@ export default function HistorialConteos() {
     setLoadingItems(false)
   }
 
+  async function cambiarTipo(nuevoTipo) {
+    if (!conteoSeleccionado) return
+    setSavingType(true)
+
+    await supabase
+      .from('inventory_counts')
+      .update({ count_type: nuevoTipo })
+      .eq('id', conteoSeleccionado.id)
+
+    // Actualizar estado local
+    const actualizado = { ...conteoSeleccionado, count_type: nuevoTipo }
+    setConteoSeleccionado(actualizado)
+    setConteos(conteos.map(c => c.id === actualizado.id ? actualizado : c))
+    setSavingType(false)
+  }
+
   function cerrarDetalle() {
     setConteoSeleccionado(null)
     setItems([])
@@ -52,6 +69,10 @@ export default function HistorialConteos() {
       const avgCost = item.insumos?.avg_cost || 0
       return sum + (item.quantity * avgCost)
     }, 0)
+  }
+
+  function labelTipo(tipo) {
+    return tipo === 'cierre_mes' ? 'Cierre de mes' : 'Seguimiento'
   }
 
   return (
@@ -90,9 +111,18 @@ export default function HistorialConteos() {
                         day: 'numeric',
                       })}
                     </p>
-                    {conteo.notes && (
-                      <p className="text-gray-500 text-sm mt-1">{conteo.notes}</p>
-                    )}
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${
+                        conteo.count_type === 'cierre_mes'
+                          ? 'bg-orange-900/50 text-orange-400'
+                          : 'bg-gray-800 text-gray-500'
+                      }`}>
+                        {labelTipo(conteo.count_type)}
+                      </span>
+                      {conteo.notes && (
+                        <span className="text-gray-500 text-xs">{conteo.notes}</span>
+                      )}
+                    </div>
                   </div>
                   <span className="text-orange-400 text-sm">Ver →</span>
                 </div>
@@ -104,10 +134,10 @@ export default function HistorialConteos() {
         {/* Modal detalle */}
         {conteoSeleccionado && (
           <div className="fixed inset-0 bg-black/70 flex items-end md:items-center justify-center z-50 p-4">
-            <div className="bg-gray-900 rounded-2xl w-full max-w-lg max-h-[80vh] flex flex-col border border-gray-800">
+            <div className="bg-gray-900 rounded-2xl w-full max-w-lg max-h-[85vh] flex flex-col border border-gray-800">
 
-              <div className="p-4 border-b border-gray-800 flex justify-between items-center">
-                <div>
+              <div className="p-4 border-b border-gray-800 flex justify-between items-start">
+                <div className="flex-1 min-w-0">
                   <p className="text-white font-semibold">
                     {new Date(conteoSeleccionado.date + 'T12:00:00').toLocaleDateString('es-CL', {
                       year: 'numeric',
@@ -116,10 +146,25 @@ export default function HistorialConteos() {
                     })}
                   </p>
                   {conteoSeleccionado.notes && (
-                    <p className="text-gray-500 text-sm">{conteoSeleccionado.notes}</p>
+                    <p className="text-gray-500 text-sm mt-0.5">{conteoSeleccionado.notes}</p>
                   )}
+
+                  {/* Selector de tipo */}
+                  <div className="flex items-center gap-2 mt-2">
+                    <span className="text-gray-500 text-xs">Tipo:</span>
+                    <select
+                      value={conteoSeleccionado.count_type}
+                      onChange={e => cambiarTipo(e.target.value)}
+                      disabled={savingType}
+                      className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-white text-xs disabled:opacity-50"
+                    >
+                      <option value="cierre_mes">Cierre de mes</option>
+                      <option value="seguimiento">Seguimiento</option>
+                    </select>
+                    {savingType && <span className="text-gray-600 text-xs">Guardando...</span>}
+                  </div>
                 </div>
-                <button onClick={cerrarDetalle} className="text-gray-400 hover:text-white text-xl">✕</button>
+                <button onClick={cerrarDetalle} className="text-gray-400 hover:text-white text-xl ml-3">✕</button>
               </div>
 
               <div className="overflow-y-auto flex-1 p-4">
