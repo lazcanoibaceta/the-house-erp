@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import * as XLSX from 'xlsx'
 import { createClient } from '@/lib/supabase'
 import Link from 'next/link'
@@ -61,6 +61,19 @@ function ImportadorJusto() {
   const [guardando, setGuardando] = useState(false)
   const [success, setSuccess] = useState(false)
   const [error, setError] = useState(null)
+  const [ultimosPeriodos, setUltimosPeriodos] = useState(null)
+
+  useEffect(() => {
+    async function fetchUltimos() {
+      const { data } = await supabase
+        .from('sales_periods')
+        .select('period_start, period_end, location_id, locations(short_code)')
+        .order('period_end', { ascending: false })
+        .limit(4)
+      if (data && data.length > 0) setUltimosPeriodos(data)
+    }
+    fetchUltimos()
+  }, [success])
 
   function parsearExcel(file) {
     return new Promise((resolve, reject) => {
@@ -276,6 +289,35 @@ function ImportadorJusto() {
 
   return (
     <div className="flex flex-col gap-4">
+
+      {/* Últimos períodos guardados */}
+      {ultimosPeriodos && (() => {
+        const vistos = new Set()
+        const unicos = ultimosPeriodos.filter(p => {
+          const key = `${p.period_start}_${p.period_end}`
+          if (vistos.has(key)) return false
+          vistos.add(key)
+          return true
+        })
+        return (
+          <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
+            <p className="text-gray-400 text-xs uppercase tracking-wide mb-2">Últimos meses importados</p>
+            <div className="flex flex-col gap-1">
+              {unicos.map((p, i) => (
+                <div key={i} className="flex justify-between items-center">
+                  <span className={`text-sm ${i === 0 ? 'text-white font-semibold' : 'text-gray-400'}`}>
+                    {new Date(p.period_start + 'T12:00:00').toLocaleDateString('es-CL', { day: 'numeric', month: 'short' })}
+                    {' → '}
+                    {new Date(p.period_end + 'T12:00:00').toLocaleDateString('es-CL', { day: 'numeric', month: 'short', year: 'numeric' })}
+                  </span>
+                  {i === 0 && <span className="text-xs bg-orange-900/50 text-orange-400 px-2 py-0.5 rounded-full">último</span>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      })()}
+
       {!preview && !success && (
         <div className="bg-gray-900 rounded-2xl p-6 border border-gray-800">
           <label className="flex flex-col items-center gap-3 cursor-pointer">
@@ -392,6 +434,20 @@ function ImportadorPeya() {
   const [guardando, setGuardando] = useState(false)
   const [success, setSuccess] = useState(false)
   const [error, setError] = useState(null)
+  const [ultimosPeriodos, setUltimosPeriodos] = useState(null)
+
+  useEffect(() => {
+    async function fetchUltimos() {
+      const { data } = await supabase
+        .from('platform_settlements')
+        .select('period_start, period_end, location_id, locations(short_code)')
+        .eq('platform', 'pedidosya')
+        .order('period_end', { ascending: false })
+        .limit(4)
+      if (data && data.length > 0) setUltimosPeriodos(data)
+    }
+    fetchUltimos()
+  }, [success])
 
   // Formulario PDF (ingreso manual)
   const [pdf, setPdf] = useState({
@@ -416,7 +472,8 @@ function ImportadorPeya() {
       const data = await file.arrayBuffer()
       const wb = XLSX.read(data, { type: 'array' })
       const ws = wb.Sheets[wb.SheetNames[0]]
-      const rows = XLSX.utils.sheet_to_json(ws)
+      // range:1 salta la fila 0 (super-encabezados de grupo) y usa fila 1 como headers reales
+      const rows = XLSX.utils.sheet_to_json(ws, { range: 1 })
 
       if (rows.length === 0) throw new Error('El archivo no tiene datos')
 
@@ -424,7 +481,6 @@ function ImportadorPeya() {
       const resultado = procesarPeya(rows)
       setPreview(resultado)
 
-      // Autocompletar fechas del formulario PDF
       setPdf(prev => ({
         ...prev,
         period_start: resultado.period_start,
@@ -438,55 +494,56 @@ function ImportadorPeya() {
   }
 
   function procesarPeya(rows) {
-    // Detectar nombres de columnas clave
-    const firstRow = rows[0]
-    const cols = Object.keys(firstRow)
+    // Parsear fecha DD/MM/YYYY (formato PedidosYa Chile)
+    function parseFecha(val) {
+      if (!val) return new Date(NaN)
+      if (typeof val === 'string' && /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(val)) {
+        const [d, m, y] = val.split('/')
+        return new Date(`${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`)
+      }
+      return new Date(val)
+    }
 
-    const colSucursal = cols.find(c => c.toLowerCase().includes('sucursal'))
-    const colFecha = cols.find(c => c.toLowerCase().includes('fecha'))
-    const colBruto = cols.find(c => c.toLowerCase().includes('bruto'))
-    const colNeto = cols.find(c => c.toLowerCase().includes('neto de la venta') || c.toLowerCase().includes('monto neto'))
-    const colComision = cols.find(c => c.toLowerCase().includes('servicio ventas pedidoya ($)') || c.toLowerCase().includes('servicio ventas pedidoy'))
-    const colPlus = cols.find(c => c.toLowerCase().includes('plus'))
-    const colDescLocal = cols.find(c => c.toLowerCase().includes('descuento otorgado por el local'))
-    const colDescPeya = cols.find(c => c.toLowerCase().includes('desc') && c.toLowerCase().includes('peya'))
-
-    // Mapear sucursales a locales
-    const mapLocal = (sucursal) => {
-      if (!sucursal) return null
-      const s = sucursal.toLowerCase()
+    // Mapear nombre de local a código
+    const mapLocal = (val) => {
+      if (!val) return null
+      const s = val.toString().toLowerCase()
       if (s.includes('san felipe')) return 'SF'
-      if (s.includes('los andes')) return 'LA'
+      if (s.includes('andes')) return 'LA'
       return null
     }
 
-    // Detectar período
+    // Detectar período desde columna "Fecha del pedido"
     const fechas = rows
-      .map(r => new Date(r[colFecha]))
+      .map(r => parseFecha(r['Fecha del pedido']))
       .filter(d => !isNaN(d))
       .sort((a, b) => a - b)
     const period_start = fechas[0]?.toISOString().split('T')[0]
     const period_end = fechas[fechas.length - 1]?.toISOString().split('T')[0]
 
-    // Agrupar por local
-    const porLocal = { SF: { gross: 0, net: 0, commission: 0, plus: 0, desc_local: 0, desc_peya: 0, orders: 0 },
-                       LA: { gross: 0, net: 0, commission: 0, plus: 0, desc_local: 0, desc_peya: 0, orders: 0 } }
+    // Acumular por local
+    const porLocal = {
+      SF: { gross: 0, net: 0, commission: 0, plus: 0, desc_local: 0, desc_peya: 0, orders: 0 },
+      LA: { gross: 0, net: 0, commission: 0, plus: 0, desc_local: 0, desc_peya: 0, orders: 0 },
+    }
 
     for (const row of rows) {
-      const loc = mapLocal(row[colSucursal])
+      const loc = mapLocal(row['Local'])
       if (!loc) continue
-      porLocal[loc].gross += parseFloat(row[colBruto] || 0)
-      porLocal[loc].net += parseFloat(row[colNeto] || 0)
-      porLocal[loc].commission += parseFloat(row[colComision] || 0)
-      porLocal[loc].plus += parseFloat(row[colPlus] || 0)
-      porLocal[loc].desc_local += parseFloat(row[colDescLocal] || 0)
-      porLocal[loc].desc_peya += parseFloat(row[colDescPeya] || 0)
-      porLocal[loc].orders += 1
+
+      porLocal[loc].gross       += parseFloat(row['Total del pedido'] || 0)
+      porLocal[loc].net         += parseFloat(row['Total pagado por el usuario'] || 0)
+      porLocal[loc].commission  += parseFloat(row['Comisión por pedido'] || 0)
+      porLocal[loc].plus        += parseFloat(row['Costo por pedido plus'] || 0)
+      porLocal[loc].desc_local  += parseFloat(row['Descuento en productos subsidiado por el local'] || 0)
+                                 + parseFloat(row['Cupón pagado por el local'] || 0)
+      porLocal[loc].desc_peya   += parseFloat(row['Descuento al usuario pagado por PedidosYa'] || 0)
+      porLocal[loc].orders      += 1
     }
 
     const net_sales_total = Math.round(porLocal.SF.net + porLocal.LA.net)
-    const commission_total = Math.round(Math.abs(porLocal.SF.commission) + Math.abs(porLocal.LA.commission))
-    const plus_total = Math.round(Math.abs(porLocal.SF.plus) + Math.abs(porLocal.LA.plus))
+    const commission_total = Math.round(porLocal.SF.commission + porLocal.LA.commission)
+    const plus_total = Math.round(porLocal.SF.plus + porLocal.LA.plus)
 
     return {
       period_start,
@@ -550,6 +607,35 @@ function ImportadorPeya() {
   return (
     <div className="flex flex-col gap-4">
 
+      {/* Últimos períodos guardados */}
+      {ultimosPeriodos && (() => {
+        // Deduplicar por period_start+period_end (SF y LA comparten mismas fechas)
+        const vistos = new Set()
+        const unicos = ultimosPeriodos.filter(p => {
+          const key = `${p.period_start}_${p.period_end}`
+          if (vistos.has(key)) return false
+          vistos.add(key)
+          return true
+        })
+        return (
+          <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
+            <p className="text-gray-400 text-xs uppercase tracking-wide mb-2">Últimas semanas importadas</p>
+            <div className="flex flex-col gap-1">
+              {unicos.map((p, i) => (
+                <div key={i} className="flex justify-between items-center">
+                  <span className={`text-sm ${i === 0 ? 'text-white font-semibold' : 'text-gray-400'}`}>
+                    {new Date(p.period_start + 'T12:00:00').toLocaleDateString('es-CL', { day: 'numeric', month: 'short' })}
+                    {' → '}
+                    {new Date(p.period_end + 'T12:00:00').toLocaleDateString('es-CL', { day: 'numeric', month: 'short', year: 'numeric' })}
+                  </span>
+                  {i === 0 && <span className="text-xs bg-orange-900/50 text-orange-400 px-2 py-0.5 rounded-full">último</span>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      })()}
+
       {!success && (
         <>
           {/* Upload Excel */}
@@ -590,7 +676,7 @@ function ImportadorPeya() {
                         <span className="text-gray-400">% comisión efectiva</span>
                         <span className="text-yellow-400">
                           {preview.porLocal[loc].net > 0
-                            ? ((Math.abs(preview.porLocal[loc].commission) / preview.porLocal[loc].net) * 100).toFixed(1)
+                            ? ((preview.porLocal[loc].commission / preview.porLocal[loc].net) * 100).toFixed(1)
                             : 0}%
                         </span>
                       </div>

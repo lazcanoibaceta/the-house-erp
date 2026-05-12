@@ -7,27 +7,30 @@ import { useState, useEffect } from 'react'
 
 const groups = [
   {
-    label: 'Operación',
+    label: 'Registrar',
     links: [
-      { href: '/compras', label: 'Compras' },
-      { href: '/inventario', label: 'Inventario' },
+      { href: '/compras',          label: 'Compras' },
       { href: '/inventario/conteo', label: 'Conteo' },
-      { href: '/inventario/subrecetas', label: 'Sub-recetas' },
-      { href: '/labor', label: 'Labor' },
+      { href: '/gastos/nuevo',     label: 'Gastos' },
+      { href: '/labor',            label: 'Labor' },
+      { href: '/ventas/importar',  label: 'Importar ventas' },
     ],
   },
   {
-    label: 'Análisis',
+    label: 'Analizar',
     links: [
+      { href: '/ventas',            label: 'Ventas' },
       { href: '/inventario/costeo', label: 'Costeo' },
-      { href: '/ventas', label: 'Ventas' },
-      { href: '/gastos', label: 'Gastos' },
+      { href: '/resultados',        label: 'Resultados' },
     ],
   },
   {
-    label: 'Herramientas',
+    label: 'Config',
     links: [
-      { href: '/conversor', label: 'Conversor' },
+      { href: '/inventario',           label: 'Insumos' },
+      { href: '/inventario/recetas',   label: 'Recetas' },
+      { href: '/inventario/subrecetas',label: 'Sub-recetas' },
+      { href: '/conversor',            label: 'Conversor' },
     ],
   },
 ]

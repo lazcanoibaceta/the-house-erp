@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase'
 import { useLocation } from '@/hooks/useLocation'
+import { getFoodCost } from '@/lib/foodcost'
 import Link from 'next/link'
 
 const supabase = createClient()
@@ -97,60 +98,15 @@ export default function Home() {
     setCalculando(prev => ({ ...prev, [code]: true }))
     setFcErrors(prev => ({ ...prev, [code]: '' }))
 
-    const { data: counts } = await supabase
-      .from('inventory_counts')
-      .select('id, date')
-      .eq('location_id', locId)
-      .eq('count_type', 'cierre_mes')
-      .order('date', { ascending: false })
-      .limit(2)
+    const result = await getFoodCost(locId, supabase)
 
-    if (!counts || counts.length < 2) {
-      setFcErrors(prev => ({ ...prev, [code]: 'Necesitas 2 conteos de cierre de mes.' }))
+    if (!result.ok) {
+      setFcErrors(prev => ({ ...prev, [code]: result.error }))
       setCalculando(prev => ({ ...prev, [code]: false }))
       return
     }
 
-    const countFinal   = counts[0]
-    const countInicial = counts[1]
-
-    const [{ data: itemsFinal }, { data: itemsInicial }] = await Promise.all([
-      supabase.from('inventory_count_items').select('quantity, insumos(avg_cost)').eq('count_id', countFinal.id),
-      supabase.from('inventory_count_items').select('quantity, insumos(avg_cost)').eq('count_id', countInicial.id),
-    ])
-
-    const invFinal   = (itemsFinal   || []).reduce((s, i) => s + i.quantity * (i.insumos?.avg_cost || 0), 0)
-    const invInicial = (itemsInicial || []).reduce((s, i) => s + i.quantity * (i.insumos?.avg_cost || 0), 0)
-
-    const { data: comprasData } = await supabase
-      .from('purchases')
-      .select('total')
-      .eq('location_id', locId)
-      .gte('date', countInicial.date)
-      .lte('date', countFinal.date)
-
-    const totalCompras = (comprasData || []).reduce((s, c) => s + parseFloat(c.total), 0)
-
-    const { data: ventasData } = await supabase
-      .from('sales_periods')
-      .select('total_sales')
-      .eq('location_id', locId)
-      .gte('period_start', countInicial.date)
-      .lte('period_end',   countFinal.date)
-
-    const ventasNetas = (ventasData || []).reduce((s, v) => s + parseFloat(v.total_sales), 0) / 1.19
-
-    if (ventasNetas === 0) {
-      setFcErrors(prev => ({ ...prev, [code]: 'Sin ventas en el período.' }))
-      setCalculando(prev => ({ ...prev, [code]: false }))
-      return
-    }
-
-    const costoMercaderia = invInicial + totalCompras - invFinal
-    const value           = (costoMercaderia / ventasNetas) * 100
-
-    const cache = { value, invInicial, compras: totalCompras, invFinal, ventasNetas, costoMercaderia, desde: countInicial.date, hasta: countFinal.date, calculatedAt: new Date().toISOString() }
-
+    const cache = { ...result, calculatedAt: new Date().toISOString() }
     localStorage.setItem(`foodcost_${locId}`, JSON.stringify(cache))
     setFcCaches(prev => ({ ...prev, [code]: cache }))
     setCalculando(prev => ({ ...prev, [code]: false }))
