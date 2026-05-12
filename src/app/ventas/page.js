@@ -12,6 +12,7 @@ export default function Ventas() {
   const [mesKey, setMesKey] = useState(null)     // 'YYYY-MM'
   const [loc, setLoc] = useState('AMBOS')
   const [data, setData] = useState(null)
+  const [dataAnterior, setDataAnterior] = useState(null)   // mes anterior
   const [loading, setLoading] = useState(true)
 
   // Cargar lista de meses disponibles
@@ -46,6 +47,7 @@ export default function Ventas() {
 
   async function fetchData() {
     setLoading(true)
+    setDataAnterior(null)
 
     const mes = periodos.find(m => m.key === mesKey)
     if (!mes) return
@@ -126,6 +128,24 @@ export default function Ventas() {
     const { data: settlements } = await settlementsQuery
 
     setData({ periodo: combined, canales: canalesCombinados, dias: diasCombinados, productos: productosUnicos, settlements: settlements || [] })
+
+    // Mes anterior (para comparación)
+    const mesIdx = periodos.findIndex(m => m.key === mesKey)
+    if (mesIdx < periodos.length - 1) {
+      const mesAnt = periodos[mesIdx + 1]
+      const periodIdsAnt = loc === 'AMBOS'
+        ? mesAnt.periodos.map(p => p.id)
+        : (() => { const p = mesAnt.periodos.find(p => p.location_id === locationMap[loc]); return p ? [p.id] : [] })()
+      if (periodIdsAnt.length > 0) {
+        const { data: periodsAnt } = await supabase.from('sales_periods').select('*').in('id', periodIdsAnt)
+        setDataAnterior(combinarPeriodos(periodsAnt || []))
+      } else {
+        setDataAnterior(null)
+      }
+    } else {
+      setDataAnterior(null)
+    }
+
     setLoading(false)
   }
 
@@ -234,6 +254,50 @@ export default function Ventas() {
               ))}
             </div>
 
+            {/* Comparación mes a mes */}
+            {dataAnterior && (() => {
+              const mesActualLabel = new Date(data.periodo.period_start + 'T12:00:00').toLocaleDateString('es-CL', { month: 'short' })
+              const mesAntLabel    = new Date(dataAnterior.period_start + 'T12:00:00').toLocaleDateString('es-CL', { month: 'short' })
+
+              function diff(actual, anterior) {
+                if (!anterior || anterior === 0) return null
+                return ((actual - anterior) / anterior) * 100
+              }
+              function Flecha({ pct, invertido = false }) {
+                if (pct == null) return <span className="text-gray-600 text-xs">—</span>
+                const sube = pct >= 0
+                const bueno = invertido ? !sube : sube
+                const color = bueno ? 'text-green-400' : 'text-red-400'
+                const icon  = sube ? '▲' : '▼'
+                return <span className={`text-xs font-semibold ${color}`}>{icon} {Math.abs(pct).toFixed(1)}%</span>
+              }
+
+              const metricas = [
+                { label: 'Ventas',         actual: data.periodo.total_sales,   anterior: dataAnterior.total_sales,   fmt: v => '$' + Math.round(v).toLocaleString('es-CL') },
+                { label: 'Órdenes',        actual: data.periodo.total_orders,  anterior: dataAnterior.total_orders,  fmt: v => v.toLocaleString('es-CL') },
+                { label: 'Ticket',         actual: data.periodo.avg_ticket,    anterior: dataAnterior.avg_ticket,    fmt: v => '$' + Math.round(v).toLocaleString('es-CL') },
+                { label: 'Promedio diario',actual: data.periodo.daily_avg,     anterior: dataAnterior.daily_avg,     fmt: v => '$' + Math.round(v).toLocaleString('es-CL') },
+              ]
+
+              return (
+                <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
+                  <h3 className="text-white font-semibold mb-3">Comparación mes a mes</h3>
+                  <div className="grid grid-cols-4 gap-2">
+                    {metricas.map(m => (
+                      <div key={m.label} className="bg-gray-800/60 rounded-xl p-3 flex flex-col gap-1">
+                        <span className="text-gray-400 text-xs uppercase tracking-wide">{m.label}</span>
+                        <span className="text-white font-bold text-sm">{m.fmt(m.actual)}</span>
+                        <div className="flex items-center justify-between">
+                          <span className="text-gray-600 text-xs">{mesAntLabel}: {m.fmt(m.anterior)}</span>
+                          <Flecha pct={diff(m.actual, m.anterior)} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })()}
+
             {/* Delivery vs Presencial */}
             <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
               <h3 className="text-white font-semibold mb-3">Delivery vs Presencial</h3>
@@ -257,23 +321,71 @@ export default function Ventas() {
               </div>
             </div>
 
-            {/* Canales */}
-            {data.canales.length > 0 && (
-              <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
-                <h3 className="text-white font-semibold mb-3">Por canal</h3>
-                <div className="flex flex-col gap-2">
-                  {data.canales.map((c, i) => (
-                    <div key={i} className="flex justify-between items-center py-1 border-b border-gray-800 last:border-0">
-                      <span className="text-gray-300 text-sm capitalize">{c.channel}</span>
-                      <div className="text-right">
-                        <span className="text-white text-sm font-semibold">${c.sales.toLocaleString('es-CL')}</span>
-                        <span className="text-gray-500 text-xs ml-2">{c.pct_of_location}%</span>
-                      </div>
-                    </div>
-                  ))}
+            {/* Rentabilidad por canal */}
+            {data.canales.length > 0 && (() => {
+              const totalVentas = data.periodo.total_sales
+
+              // Datos de settlements para comisión PedidosYa (si están importados)
+              const peyaSettlement = data.settlements.length > 0 ? {
+                commission: data.settlements.reduce((s, x) => s + (x.commission || 0) + (x.plus_charges || 0), 0),
+                net:        data.settlements.reduce((s, x) => s + (x.net_sales   || 0), 0),
+                gross:      data.settlements.reduce((s, x) => s + (x.gross_sales || 0), 0),
+              } : null
+
+              const colores = {
+                'pedidosya':       { text: 'text-yellow-400', bg: 'bg-yellow-500', label: '🛵 PedidosYa' },
+                'justo':           { text: 'text-blue-400',   bg: 'bg-blue-500',   label: '📊 Justo' },
+                'venta presencial':{ text: 'text-green-400',  bg: 'bg-green-500',  label: '🏠 Presencial' },
+              }
+              const getColor = ch => colores[ch.toLowerCase()] || { text: 'text-gray-400', bg: 'bg-gray-500', label: ch }
+
+              return (
+                <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
+                  <h3 className="text-white font-semibold mb-4">Rentabilidad por canal</h3>
+
+                  <div className="flex flex-col gap-3">
+                    {data.canales.map((canal, i) => {
+                      const isPeya  = canal.channel.toLowerCase() === 'pedidosya'
+                      const { text, bg, label } = getColor(canal.channel)
+                      const pct = totalVentas > 0 ? (canal.sales / totalVentas) * 100 : 0
+
+                      return (
+                        <div key={i} className="flex flex-col gap-1.5">
+                          <div className="flex justify-between items-baseline">
+                            <span className={`text-sm font-medium ${text}`}>{label}</span>
+                            <span className="text-white font-semibold text-sm">${canal.sales.toLocaleString('es-CL')}</span>
+                          </div>
+
+                          {/* Barra */}
+                          <div className="bg-gray-800 rounded-full h-2">
+                            <div className={`${bg} h-2 rounded-full`} style={{ width: `${pct}%` }} />
+                          </div>
+
+                          {/* Info extra */}
+                          <div className="flex justify-between items-center">
+                            <span className="text-gray-600 text-xs">{canal.orders} órdenes · ticket ${canal.orders > 0 ? Math.round(canal.sales / canal.orders).toLocaleString('es-CL') : 0}</span>
+                            {isPeya && peyaSettlement ? (
+                              <span className="text-xs">
+                                <span className="text-red-400">-${peyaSettlement.commission.toLocaleString('es-CL')} comisión</span>
+                                <span className="text-gray-600 mx-1">→</span>
+                                <span className="text-green-400 font-semibold">neto ${peyaSettlement.net.toLocaleString('es-CL')}</span>
+                              </span>
+                            ) : isPeya ? (
+                              <Link href="/ventas/importar" className="text-orange-500 text-xs hover:text-orange-400">
+                                Importar liquidación →
+                              </Link>
+                            ) : (
+                              <span className="text-gray-600 text-xs">{pct.toFixed(1)}% del total</span>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
                 </div>
-              </div>
-            )}
+              )
+            })()}
+
 
             {/* Liquidaciones PedidosYa */}
             {data.settlements && data.settlements.length > 0 && (() => {
