@@ -114,13 +114,17 @@ export default function Ventas() {
     }
 
     // Liquidaciones PedidosYa del mes
-    // Usamos solapamiento: cualquier semana que toque el mes
-    // (period_start <= fin del mes AND period_end >= inicio del mes)
+    // Solapamiento: cualquier semana que toque el mes
+    // Calculamos el último día real del mes para evitar fechas inválidas como '2026-04-31'
+    const [mesAnio, mesNum] = mesKey.split('-').map(Number)
+    const ultimoDiaMes = new Date(mesAnio, mesNum, 0).getDate()
+    const mesFin = `${mesKey}-${String(ultimoDiaMes).padStart(2, '0')}`
+
     let settlementsQuery = supabase
       .from('platform_settlements')
       .select('*')
       .eq('platform', 'pedidosya')
-      .lte('period_start', mesKey + '-31')
+      .lte('period_start', mesFin)
       .gte('period_end',   mesKey + '-01')
       .order('period_start')
 
@@ -406,7 +410,7 @@ export default function Ventas() {
               const semanas = Object.values(semanaMap).sort((a, b) => a.period_start.localeCompare(b.period_start))
               const totalGross      = semanas.reduce((s, w) => s + w.gross, 0)
               const totalCommission = semanas.reduce((s, w) => s + w.commission + w.plus, 0)
-              const totalSettled    = semanas.reduce((s, w) => s + (w.settled || (w.net - w.commission - w.plus)), 0)
+              const totalSettled    = semanas.reduce((s, w) => s + (w.net - w.commission - w.plus), 0)
               const pctComision     = totalGross > 0 ? ((totalCommission / totalGross) * 100).toFixed(1) : 0
 
               return (
@@ -440,7 +444,7 @@ export default function Ventas() {
                   <div className="flex flex-col gap-1">
                     {semanas.map((s, i) => {
                       const cobros = s.commission + s.plus
-                      const neto   = s.settled || (s.net - cobros)
+                      const neto   = s.net - cobros
                       const pct    = s.gross > 0 ? ((cobros / s.gross) * 100).toFixed(1) : 0
                       return (
                         <div key={i} className="flex justify-between items-center py-2 border-b border-gray-800 last:border-0 text-sm">
