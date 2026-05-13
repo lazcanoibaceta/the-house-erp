@@ -114,12 +114,14 @@ export default function Ventas() {
     }
 
     // Liquidaciones PedidosYa del mes
+    // Usamos solapamiento: cualquier semana que toque el mes
+    // (period_start <= fin del mes AND period_end >= inicio del mes)
     let settlementsQuery = supabase
       .from('platform_settlements')
       .select('*')
       .eq('platform', 'pedidosya')
-      .gte('period_start', mesKey + '-01')
       .lte('period_start', mesKey + '-31')
+      .gte('period_end',   mesKey + '-01')
       .order('period_start')
 
     if (loc !== 'AMBOS') {
