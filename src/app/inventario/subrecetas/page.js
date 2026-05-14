@@ -23,7 +23,7 @@ export default function SubRecetas() {
   async function fetchData() {
     const [{ data: ins }, { data: subs }] = await Promise.all([
       supabase.from('insumos').select('id, name, unit').order('name'),
-      supabase.from('insumo_recipes').select('id, insumo_id, ingredient_id, quantity, insumos!insumo_recipes_ingredient_id_fkey(name, unit)'),
+      supabase.from('insumo_recipes').select('id, insumo_id, ingredient_id, quantity, insumos!insumo_recipes_ingredient_id_fkey(name, unit, avg_cost)'),
     ])
 
     setInsumos(ins || [])
@@ -38,6 +38,7 @@ export default function SubRecetas() {
         quantity: sr.quantity,
         nombre: sr.insumos?.name,
         unit: sr.insumos?.unit,
+        avg_cost: sr.insumos?.avg_cost ?? 0,
       })
     })
     setSubRecetasMap(map)
@@ -245,9 +246,22 @@ export default function SubRecetas() {
                       {subs.map((sr, i) => (
                         <div key={i} className="flex justify-between text-sm text-gray-400">
                           <span>{sr.nombre}</span>
-                          <span>{sr.quantity} {sr.unit}</span>
+                          <div className="flex items-center gap-3 tabular-nums">
+                            <span className="text-gray-500">{sr.quantity} {sr.unit}</span>
+                            <span className="text-gray-400">
+                              ${Math.round(sr.quantity * sr.avg_cost).toLocaleString('es-CL')}
+                            </span>
+                          </div>
                         </div>
                       ))}
+                      {subs.length > 0 && (
+                        <div className="flex justify-between text-sm font-semibold text-white border-t border-gray-800 mt-1 pt-1">
+                          <span>Costo total</span>
+                          <span className="tabular-nums">
+                            ${Math.round(subs.reduce((s, sr) => s + sr.quantity * sr.avg_cost, 0)).toLocaleString('es-CL')}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )
