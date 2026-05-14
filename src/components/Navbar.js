@@ -4,20 +4,23 @@ import { useRouter, usePathname } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import Link from 'next/link'
 import { useState, useEffect } from 'react'
+import { useRole, clearRoleCache } from '@/hooks/useRole'
 
-const groups = [
+const allGroups = [
   {
     label: 'Registrar',
+    roles: ['admin_supremo', 'admin', 'cajero'],
     links: [
-      { href: '/compras',          label: 'Compras' },
-      { href: '/inventario/conteo', label: 'Conteo' },
-      { href: '/gastos/nuevo',     label: 'Gastos' },
-      { href: '/labor',            label: 'Labor' },
-      { href: '/ventas/importar',  label: 'Importar ventas' },
+      { href: '/compras',           label: 'Compras',         roles: ['admin_supremo', 'admin', 'cajero'] },
+      { href: '/inventario/conteo', label: 'Conteo',          roles: ['admin_supremo', 'admin', 'cajero'] },
+      { href: '/gastos/nuevo',      label: 'Gastos',          roles: ['admin_supremo', 'admin', 'cajero'] },
+      { href: '/labor',             label: 'Labor',           roles: ['admin_supremo', 'admin'] },
+      { href: '/ventas/importar',   label: 'Importar ventas', roles: ['admin_supremo'] },
     ],
   },
   {
     label: 'Analizar',
+    roles: ['admin_supremo', 'admin'],
     links: [
       { href: '/ventas',            label: 'Ventas' },
       { href: '/inventario/costeo', label: 'Costeo' },
@@ -26,11 +29,12 @@ const groups = [
   },
   {
     label: 'Config',
+    roles: ['admin_supremo'],
     links: [
-      { href: '/inventario',           label: 'Insumos' },
-      { href: '/inventario/recetas',   label: 'Recetas' },
-      { href: '/inventario/subrecetas',label: 'Sub-recetas' },
-      { href: '/conversor',            label: 'Conversor' },
+      { href: '/inventario',            label: 'Insumos' },
+      { href: '/inventario/recetas',    label: 'Recetas' },
+      { href: '/inventario/subrecetas', label: 'Sub-recetas' },
+      { href: '/conversor',             label: 'Conversor' },
     ],
   },
 ]
@@ -41,23 +45,43 @@ function isActive(pathname, href) {
 }
 
 export default function Navbar() {
-  const router = useRouter()
+  const router   = useRouter()
   const pathname = usePathname()
   const supabase = createClient()
   const [location, setLocation] = useState('SF')
+  const { role, locationCode: rolLocationCode, loading: roleLoading } = useRole()
+
+  // Mientras carga: mostrar todo para evitar parpadeo
+  // Con rol cargado: filtrar según permisos
+  // Sin rol (null): mostrar solo Registrar como mínimo seguro
+  const groups = allGroups.filter(g => {
+    if (roleLoading) return true
+    if (!role)       return g.roles.includes('cajero')
+    return g.roles.includes(role)
+  })
 
   useEffect(() => {
     const saved = localStorage.getItem('location') || 'SF'
     setLocation(saved)
   }, [])
 
+  // Si el cajero tiene local asignado, forzar su ubicación y no dejar cambiarla
+  useEffect(() => {
+    if (role === 'cajero' && rolLocationCode) {
+      setLocation(rolLocationCode)
+      localStorage.setItem('location', rolLocationCode)
+    }
+  }, [role, rolLocationCode])
+
   function handleLocationChange(loc) {
+    if (role === 'cajero') return   // cajeros no pueden cambiar local
     setLocation(loc)
     localStorage.setItem('location', loc)
     router.refresh()
   }
 
   async function handleLogout() {
+    clearRoleCache()
     await supabase.auth.signOut()
     router.push('/login')
     router.refresh()
@@ -88,20 +112,16 @@ export default function Navbar() {
           {groups.map((group, gi) => (
             <div key={group.label} className="flex items-stretch">
 
-              {/* Divisor entre grupos */}
               {gi > 0 && (
                 <div className="w-px bg-gray-800 mx-3 self-stretch" />
               )}
 
               <div className="flex flex-col justify-center gap-0.5">
-                {/* Etiqueta del grupo */}
                 <span className="text-[10px] uppercase tracking-widest text-gray-600 font-medium px-1">
                   {group.label}
                 </span>
-
-                {/* Links del grupo */}
                 <div className="flex items-center gap-0.5">
-                  {group.links.map(link => (
+                  {group.links.filter(link => !link.roles || roleLoading || !role || link.roles.includes(role)).map(link => (
                     <Link
                       key={link.href}
                       href={link.href}
@@ -122,21 +142,29 @@ export default function Navbar() {
 
         {/* Derecha: toggle local + logout */}
         <div className="flex items-center gap-3 shrink-0">
-          <div className="flex items-center bg-gray-800 rounded-lg p-1 gap-1">
-            {['SF', 'LA'].map(loc => (
-              <button
-                key={loc}
-                onClick={() => handleLocationChange(loc)}
-                className={`px-3 py-1 rounded-md text-sm font-medium transition ${
-                  location === loc
-                    ? 'bg-orange-500 text-white'
-                    : 'text-gray-400 hover:text-white'
-                }`}
-              >
-                {loc}
-              </button>
-            ))}
-          </div>
+          {role === 'cajero' && rolLocationCode ? (
+            /* Cajero: badge fijo, sin toggle */
+            <span className="bg-orange-500 text-white text-sm font-bold px-3 py-1.5 rounded-lg">
+              {rolLocationCode === 'SF' ? 'San Felipe' : 'Los Andes'}
+            </span>
+          ) : (
+            /* Admin / supremo: toggle normal */
+            <div className="flex items-center bg-gray-800 rounded-lg p-1 gap-1">
+              {['SF', 'LA'].map(loc => (
+                <button
+                  key={loc}
+                  onClick={() => handleLocationChange(loc)}
+                  className={`px-3 py-1 rounded-md text-sm font-medium transition ${
+                    location === loc
+                      ? 'bg-orange-500 text-white'
+                      : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  {loc}
+                </button>
+              ))}
+            </div>
+          )}
 
           <button
             onClick={handleLogout}
@@ -147,16 +175,12 @@ export default function Navbar() {
         </div>
       </div>
 
-      {/* Navegación mobile — scroll horizontal con separadores */}
+      {/* Navegación mobile */}
       <div className="flex md:hidden items-center gap-1 mt-2 overflow-x-auto pb-0.5">
         {groups.map((group, gi) => (
           <div key={group.label} className="flex items-center gap-1 shrink-0">
-
-            {gi > 0 && (
-              <span className="text-gray-700 text-xs mx-1">|</span>
-            )}
-
-            {group.links.map(link => (
+            {gi > 0 && <span className="text-gray-700 text-xs mx-1">|</span>}
+            {group.links.filter(link => !link.roles || roleLoading || !role || link.roles.includes(role)).map(link => (
               <Link
                 key={link.href}
                 href={link.href}
@@ -171,8 +195,6 @@ export default function Navbar() {
             ))}
           </div>
         ))}
-
-        {/* Logout mobile */}
         <span className="text-gray-700 text-xs mx-1">|</span>
         <button
           onClick={handleLogout}

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import RoleGuard from '@/components/RoleGuard'
 
 const PRECIO_CHEESEBURGUER = 6490
 
@@ -37,6 +38,7 @@ export default function Conversor() {
   }
 
   return (
+    <RoleGuard allowedRoles={['admin_supremo']}>
     <main className="min-h-screen bg-gray-950 p-4 md:p-8 flex items-center justify-center">
       <div className="max-w-md w-full mx-auto">
 
@@ -83,5 +85,6 @@ export default function Conversor() {
 
       </div>
     </main>
+    </RoleGuard>
   )
 }

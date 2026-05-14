@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase'
 import { getFoodCostForMonth } from '@/lib/foodcost'
 import Link from 'next/link'
+import RoleGuard from '@/components/RoleGuard'
 
 const supabase = createClient()
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
@@ -185,6 +186,7 @@ export default function Resultados() {
   })()
 
   return (
+    <RoleGuard allowedRoles={['admin_supremo', 'admin']}>
     <main className="min-h-screen bg-gray-950 p-4 md:p-8">
       <div className="max-w-2xl mx-auto">
 
@@ -335,6 +337,7 @@ export default function Resultados() {
 
       </div>
     </main>
+    </RoleGuard>
   )
 }
 

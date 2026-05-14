@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase'
 import Link from 'next/link'
+import RoleGuard from '@/components/RoleGuard'
 
 const supabase = createClient()
 const diasSemana = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
@@ -185,6 +186,7 @@ export default function Ventas() {
   const maxDia = data?.dias?.length > 0 ? Math.max(...data.dias.map(d => d.sales)) : 1
 
   return (
+    <RoleGuard allowedRoles={['admin_supremo', 'admin']}>
     <main className="min-h-screen bg-gray-950 p-4 md:p-8">
       <div className="max-w-4xl mx-auto">
 
@@ -554,5 +556,6 @@ export default function Ventas() {
         )}
       </div>
     </main>
+    </RoleGuard>
   )
 }

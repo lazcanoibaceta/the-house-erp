@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase'
 import Link from 'next/link'
+import RoleGuard from '@/components/RoleGuard'
 
 const supabase = createClient()
 
@@ -99,6 +100,7 @@ export default function Recetas() {
   const productsSinReceta    = products.filter(p => !productsConReceta.includes(p.id))
 
   return (
+    <RoleGuard allowedRoles={['admin_supremo']}>
     <main className="min-h-screen bg-gray-950 p-4 md:p-8">
       <div className="max-w-2xl mx-auto flex flex-col gap-8">
 
@@ -283,5 +285,6 @@ export default function Recetas() {
 
       </div>
     </main>
+    </RoleGuard>
   )
 }

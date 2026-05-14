@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
 import { useLocation } from '@/hooks/useLocation'
+import RoleGuard from '@/components/RoleGuard'
 
 const supabase = createClient()
 
@@ -50,6 +51,7 @@ export default function Inventario() {
   const insumosStockBajo = insumos.filter(i => i.stock <= i.min_stock)
 
   return (
+    <RoleGuard allowedRoles={['admin_supremo']}>
     <main className="min-h-screen bg-gray-950 p-4 md:p-8">
       <div className="max-w-2xl mx-auto">
 
@@ -154,5 +156,6 @@ export default function Inventario() {
 
       </div>
     </main>
+    </RoleGuard>
   )
 }
