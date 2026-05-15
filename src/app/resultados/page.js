@@ -36,17 +36,16 @@ export default function Resultados() {
   const [mesKey, setMesKey] = useState(null)           // 'YYYY-MM'
   const [mesesDisponibles, setMesesDisponibles] = useState([])
   const [locIds, setLocIds] = useState({})             // { SF: uuid, LA: uuid }
-  const [datos, setDatos] = useState(null)             // { SF: LocalData, LA: LocalData }
+  const [datos, setDatos] = useState(null)
   const [loading, setLoading] = useState(false)
 
-  // ── 1. Init: cargar IDs de locales + meses con ventas disponibles ──────────
+  // ── 1. Init ─────────────────────────────────────────────────────────────────
   useEffect(() => {
     async function init() {
       const [{ data: locs }, { data: ventas }] = await Promise.all([
         supabase.from('locations').select('id, short_code'),
         supabase.from('sales_periods').select('period_start').order('period_start', { ascending: false }),
       ])
-
       const map = {}
       for (const l of locs || []) map[l.short_code] = l.id
       setLocIds(map)
@@ -59,7 +58,7 @@ export default function Resultados() {
     init()
   }, [])
 
-  // ── 2. Recalcular cuando cambia mes o local ────────────────────────────────
+  // ── 2. Recalcular cuando cambia mes o local ──────────────────────────────────
   useEffect(() => {
     if (!mesKey || !locIds.SF) return
     calcular()
@@ -87,15 +86,20 @@ export default function Resultados() {
     const lastDay = new Date(year, month, 0).getDate()
     const hasta   = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
 
-    // Ventas del mes (period_start dentro del mes)
+    // Ventas + ticket + descuentos
     const { data: ventasData } = await supabase
       .from('sales_periods')
-      .select('total_sales')
+      .select('total_sales, total_orders, total_discounts')
       .eq('location_id', locId)
       .gte('period_start', desde)
       .lte('period_start', hasta)
 
-    const ventasNetas = (ventasData || []).reduce((s, v) => s + parseFloat(v.total_sales), 0) / 1.19
+    const totalSales     = (ventasData || []).reduce((s, v) => s + parseFloat(v.total_sales || 0), 0)
+    const ventasNetas    = totalSales / 1.19
+    const totalOrders    = (ventasData || []).reduce((s, v) => s + parseInt(v.total_orders  || 0), 0)
+    const totalDiscounts = (ventasData || []).reduce((s, v) => s + parseFloat(v.total_discounts || 0), 0)
+    const avgTicket      = totalOrders > 0 ? totalSales / totalOrders : null
+    const discountPct    = totalSales  > 0 ? (totalDiscounts / totalSales) * 100 : null
 
     // Food Cost del mes
     const fc = await getFoodCostForMonth(locId, year, month, supabase)
@@ -111,7 +115,7 @@ export default function Resultados() {
 
     const laborAmount = laborData ? parseFloat(laborData.amount) : null
 
-    // Gastos operativos del mes (amount_net = neto sin IVA)
+    // Gastos operativos del mes
     const { data: gastosData } = await supabase
       .from('operating_expenses')
       .select('amount_net')
@@ -120,33 +124,41 @@ export default function Resultados() {
       .lte('expense_date', hasta)
 
     const gastosTotal = gastosData && gastosData.length > 0
-      ? (gastosData).reduce((s, g) => s + parseFloat(g.amount_net || 0), 0)
+      ? gastosData.reduce((s, g) => s + parseFloat(g.amount_net || 0), 0)
       : null
 
-    return { ventasNetas, fc, laborAmount, gastosTotal, year, month }
+    return { ventasNetas, totalSales, totalOrders, totalDiscounts, avgTicket, discountPct, fc, laborAmount, gastosTotal, year, month }
   }
 
-  // ── Helpers de presentación ────────────────────────────────────────────────
+  // ── Helpers de presentación ──────────────────────────────────────────────────
   function mesLabel(key) {
     const [y, m] = key.split('-').map(Number)
     return `${MESES[m - 1]} ${y}`
   }
 
-  // Para "Ambos": sumar los datos de SF y LA
+  // Para "Ambos": combinar SF + LA
   function combinarDatos(sf, la) {
-    const ventas = (sf?.ventasNetas || 0) + (la?.ventasNetas || 0)
-    const fcOk = sf?.fc?.ok && la?.fc?.ok
+    const totalSales     = (sf?.totalSales     || 0) + (la?.totalSales     || 0)
+    const ventas         = (sf?.ventasNetas    || 0) + (la?.ventasNetas    || 0)
+    const totalOrders    = (sf?.totalOrders    || 0) + (la?.totalOrders    || 0)
+    const totalDisc      = (sf?.totalDiscounts || 0) + (la?.totalDiscounts || 0)
+    const avgTicket      = totalOrders > 0 ? totalSales / totalOrders : null
+    const discountPct    = totalSales  > 0 ? (totalDisc / totalSales) * 100 : null
+
+    const fcOk    = sf?.fc?.ok && la?.fc?.ok
     const fcCosto = fcOk ? (sf.fc.costoMercaderia || 0) + (la.fc.costoMercaderia || 0) : null
     const fcValue = fcOk && ventas > 0 ? (fcCosto / ventas) * 100 : null
     const labor   = sf?.laborAmount != null || la?.laborAmount != null
-      ? (sf?.laborAmount || 0) + (la?.laborAmount || 0)
-      : null
+      ? (sf?.laborAmount || 0) + (la?.laborAmount || 0) : null
     const gastos  = sf?.gastosTotal != null || la?.gastosTotal != null
-      ? (sf?.gastosTotal || 0) + (la?.gastosTotal || 0)
-      : null
+      ? (sf?.gastosTotal || 0) + (la?.gastosTotal || 0) : null
     const fcError = !sf?.fc?.ok ? sf?.fc?.error : !la?.fc?.ok ? la?.fc?.error : null
 
-    return { ventasNetas: ventas, fc: fcOk ? { ok: true, costoMercaderia: fcCosto, value: fcValue } : { ok: false, error: fcError }, laborAmount: labor, gastosTotal: gastos }
+    return {
+      ventasNetas: ventas, totalSales, totalOrders, totalDiscounts: totalDisc, avgTicket, discountPct,
+      fc: fcOk ? { ok: true, costoMercaderia: fcCosto, value: fcValue } : { ok: false, error: fcError },
+      laborAmount: labor, gastosTotal: gastos,
+    }
   }
 
   // Datos que se muestran según el toggle
@@ -156,28 +168,27 @@ export default function Resultados() {
     return datos[loc] || null
   })()
 
-  // Calcular resultado
+  // Resumen P&L + KPIs
   const resumen = (() => {
     if (!datosVista) return null
-    const { ventasNetas, fc, laborAmount, gastosTotal } = datosVista
+    const { ventasNetas, fc, laborAmount, gastosTotal, avgTicket, discountPct, totalOrders } = datosVista
     if (!ventasNetas) return null
 
-    const fcMonto  = fc?.ok ? fc.costoMercaderia : null
-    const resultado = ventasNetas
-      - (fcMonto    || 0)
-      - (laborAmount || 0)
-      - (gastosTotal || 0)
+    const fcMonto   = fc?.ok ? fc.costoMercaderia : null
+    const laborPct  = laborAmount != null ? (laborAmount / ventasNetas) * 100 : null
+    const primeCost = fcMonto != null && laborAmount != null
+      ? ((fcMonto + laborAmount) / ventasNetas) * 100 : null
 
+    const resultado = ventasNetas - (fcMonto || 0) - (laborAmount || 0) - (gastosTotal || 0)
     const allPresent = fcMonto != null && laborAmount != null && gastosTotal != null
 
     return {
-      ventasNetas,
-      fcMonto,
-      fcPct:     fc?.ok    ? fc.value              : null,
-      fcError:   !fc?.ok   ? fc?.error             : null,
-      fcDesde:   fc?.ok    ? fc.desde              : null,
-      fcHasta:   fc?.ok    ? fc.hasta              : null,
-      laborPct:  laborAmount != null ? (laborAmount / ventasNetas) * 100 : null,
+      ventasNetas, fcMonto, totalOrders, avgTicket, discountPct,
+      fcPct:     fc?.ok  ? fc.value   : null,
+      fcError:  !fc?.ok  ? fc?.error  : null,
+      fcDesde:   fc?.ok  ? fc.desde   : null,
+      fcHasta:   fc?.ok  ? fc.hasta   : null,
+      laborAmount, laborPct, primeCost,
       gastosPct: gastosTotal != null ? (gastosTotal / ventasNetas) * 100 : null,
       resultado:    allPresent ? resultado : null,
       resultadoPct: allPresent ? (resultado / ventasNetas) * 100 : null,
@@ -191,11 +202,9 @@ export default function Resultados() {
       <div className="max-w-2xl mx-auto">
 
         {/* Header */}
-        <div className="mb-6 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-white">📊 Estado de Resultados</h1>
-            <p className="text-gray-500 text-sm mt-1">Resultado financiero mensual</p>
-          </div>
+        <div className="mb-6">
+          <h1 className="text-2xl font-bold text-white">📊 Estado de Resultados</h1>
+          <p className="text-gray-500 text-sm mt-1">Resultado financiero mensual</p>
         </div>
 
         {/* Controles: mes + toggle local */}
@@ -225,7 +234,97 @@ export default function Resultados() {
           </div>
         </div>
 
-        {/* Estado de Resultados */}
+        {/* ── KPIs ── */}
+        {resumen && !loading && (
+          <div className="space-y-3 mb-6">
+
+            {/* Prime Cost */}
+            <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800 flex flex-col sm:flex-row sm:items-center gap-4">
+              <div className="flex-1">
+                <p className="text-gray-400 text-xs uppercase tracking-widest mb-1">Prime Cost</p>
+                {resumen.primeCost != null ? (
+                  <p className={`text-5xl font-black ${colorPct(resumen.primeCost, [60, 68])}`}>
+                    {resumen.primeCost.toFixed(1)}<span className="text-2xl font-semibold ml-1 opacity-70">%</span>
+                  </p>
+                ) : (
+                  <p className="text-5xl font-black text-gray-700">—</p>
+                )}
+                <p className="text-gray-600 text-xs mt-2">Food + Labor · meta ≤60%</p>
+              </div>
+              <div className="grid grid-cols-2 gap-3 sm:gap-6 sm:border-l sm:border-gray-800 sm:pl-6 shrink-0">
+                <div>
+                  <p className="text-gray-500 text-xs uppercase tracking-wide mb-1">Food Cost</p>
+                  {resumen.fcPct != null ? (
+                    <p className={`text-2xl font-bold ${colorPct(resumen.fcPct, [32, 38])}`}>
+                      {resumen.fcPct.toFixed(1)}<span className="text-sm ml-0.5">%</span>
+                    </p>
+                  ) : (
+                    <p className="text-2xl font-bold text-gray-700">—</p>
+                  )}
+                  <p className="text-gray-600 text-xs mt-0.5">meta ≤32%</p>
+                </div>
+                <div>
+                  <p className="text-gray-500 text-xs uppercase tracking-wide mb-1">Labor Cost</p>
+                  {resumen.laborPct != null ? (
+                    <p className={`text-2xl font-bold ${colorPct(resumen.laborPct, [30, 35])}`}>
+                      {resumen.laborPct.toFixed(1)}<span className="text-sm ml-0.5">%</span>
+                    </p>
+                  ) : (
+                    <div>
+                      <p className="text-2xl font-bold text-gray-700">—</p>
+                      <Link href="/labor" className="text-orange-400 text-xs hover:underline">Cargar →</Link>
+                    </div>
+                  )}
+                  {resumen.laborPct != null && <p className="text-gray-600 text-xs mt-0.5">meta ≤30%</p>}
+                </div>
+              </div>
+            </div>
+
+            {/* Ventas, Ticket, Descuentos */}
+            <div className="grid grid-cols-3 gap-3">
+              <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
+                <p className="text-gray-400 text-xs uppercase tracking-widest mb-2">Ventas Netas</p>
+                <p className="text-2xl font-bold text-white">
+                  ${Math.round(resumen.ventasNetas / 1000).toLocaleString('es-CL')}k
+                </p>
+                <p className="text-gray-600 text-xs mt-2">{mesLabel(mesKey)}</p>
+              </div>
+
+              <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
+                <p className="text-gray-400 text-xs uppercase tracking-widest mb-2">Ticket Promedio</p>
+                {resumen.avgTicket != null ? (
+                  <>
+                    <p className="text-2xl font-bold text-white">
+                      ${Math.round(resumen.avgTicket).toLocaleString('es-CL')}
+                    </p>
+                    <p className="text-gray-600 text-xs mt-2">
+                      {resumen.totalOrders?.toLocaleString('es-CL')} pedidos
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-2xl font-bold text-gray-700">—</p>
+                )}
+              </div>
+
+              <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
+                <p className="text-gray-400 text-xs uppercase tracking-widest mb-2">Descuentos</p>
+                {resumen.discountPct != null ? (
+                  <>
+                    <p className={`text-2xl font-bold ${colorPct(resumen.discountPct, [6, 10])}`}>
+                      {resumen.discountPct.toFixed(1)}<span className="text-sm ml-0.5">%</span>
+                    </p>
+                    <p className="text-gray-600 text-xs mt-2">meta ≤6%</p>
+                  </>
+                ) : (
+                  <p className="text-2xl font-bold text-gray-700">—</p>
+                )}
+              </div>
+            </div>
+
+          </div>
+        )}
+
+        {/* ── P&L ── */}
         {loading ? (
           <div className="bg-gray-900 rounded-2xl border border-gray-800 p-6 animate-pulse">
             {[...Array(5)].map((_, i) => (
@@ -242,7 +341,6 @@ export default function Resultados() {
         ) : (
           <div className="bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden">
 
-            {/* Fila: Ventas Netas */}
             <FilaResultado
               label="Ventas Netas"
               monto={resumen.ventasNetas}
@@ -251,7 +349,6 @@ export default function Resultados() {
               destacado
             />
 
-            {/* Fila: Food Cost */}
             {resumen.fcError ? (
               <FilaError
                 label="Food Cost"
@@ -270,7 +367,6 @@ export default function Resultados() {
               />
             )}
 
-            {/* Fila: Labor Cost */}
             {datosVista?.laborAmount == null ? (
               <FilaError
                 label="Costo Laboral"
@@ -288,7 +384,6 @@ export default function Resultados() {
               />
             )}
 
-            {/* Fila: Gastos Operativos */}
             {datosVista?.gastosTotal == null ? (
               <FilaError
                 label="Gastos Operativos"
@@ -306,10 +401,8 @@ export default function Resultados() {
               />
             )}
 
-            {/* Separador */}
             <div className="border-t-2 border-gray-700 mx-4" />
 
-            {/* Fila: Resultado */}
             {!resumen.allPresent ? (
               <div className="px-5 py-4 flex items-center justify-between">
                 <span className="text-gray-500 text-sm">Resultado</span>
