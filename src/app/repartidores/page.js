@@ -16,11 +16,15 @@ function serialToTime(serial) {
   return `${h}:${m}`
 }
 
+function formatDate(dateKey, opts) {
+  return new Date(dateKey + 'T12:00:00Z').toLocaleDateString('es-CL', opts)
+}
+
 export default function Repartidores() {
   const [datos, setDatos] = useState(null)
   const [archivo, setArchivo] = useState('')
-  const [diaActivo, setDiaActivo] = useState(null)
   const [asignaciones, setAsignaciones] = useState({})
+  const [inputsAbiertos, setInputsAbiertos] = useState({})
   const [error, setError] = useState(null)
 
   function procesarExcel(file) {
@@ -45,11 +49,10 @@ export default function Repartidores() {
         }
 
         const repartidores = [...new Set(rows.map(r => r['Repartidor']).filter(Boolean))]
-        const dias = Object.keys(byDay).sort()
 
         setDatos({ byDay, repartidores })
-        setDiaActivo(dias[0])
         setAsignaciones({})
+        setInputsAbiertos({})
         setError(null)
       } catch (err) {
         setError('Error al procesar el archivo: ' + err.message)
@@ -66,7 +69,22 @@ export default function Repartidores() {
   }
 
   function asignar(idCuenta, repartidor) {
-    setAsignaciones(prev => ({ ...prev, [idCuenta]: repartidor }))
+    const nombre = repartidor.trim()
+    if (!nombre) return
+    setAsignaciones(prev => ({ ...prev, [idCuenta]: nombre }))
+    setInputsAbiertos(prev => ({ ...prev, [idCuenta]: false }))
+    if (!datos.repartidores.includes(nombre)) {
+      setDatos(prev => ({ ...prev, repartidores: [...prev.repartidores, nombre] }))
+    }
+  }
+
+  function desasignar(idCuenta) {
+    setAsignaciones(prev => { const n = { ...prev }; delete n[idCuenta]; return n })
+    setInputsAbiertos(prev => { const n = { ...prev }; delete n[idCuenta]; return n })
+  }
+
+  function toggleInput(idCuenta) {
+    setInputsAbiertos(prev => ({ ...prev, [idCuenta]: !prev[idCuenta] }))
   }
 
   if (!datos) {
@@ -74,7 +92,7 @@ export default function Repartidores() {
       <main className="min-h-screen bg-gray-950 p-4 md:p-8">
         <div className="max-w-2xl mx-auto">
           <div className="mb-6">
-            <h1 className="text-2xl font-bold text-white">🛵 Repartidores</h1>
+            <h1 className="text-2xl font-bold text-white">Repartidores</h1>
             <p className="text-gray-500 text-sm mt-1">Sube el Excel de Justo Hub para ver los despachos del día</p>
           </div>
           <div className="bg-gray-900 rounded-2xl p-8 border border-gray-800">
@@ -100,111 +118,165 @@ export default function Repartidores() {
   }
 
   const dias = Object.keys(datos.byDay).sort()
-  const dia = datos.byDay[diaActivo] || { conRepartidor: [], sinRepartidor: [] }
 
-  // Totales por repartidor para el día activo, incluyendo asignaciones manuales
-  const totales = {}
-  for (const row of dia.conRepartidor) {
-    const name = row['Repartidor']
-    totales[name] = (totales[name] || 0) + row['Despacho']
-  }
-  for (const row of dia.sinRepartidor) {
-    const asignado = asignaciones[row['Id Cuenta']]
-    if (asignado) totales[asignado] = (totales[asignado] || 0) + row['Despacho']
+  // Construir vista por repartidor
+  const byRepartidor = {}
+  for (const dateKey of dias) {
+    const dia = datos.byDay[dateKey]
+    for (const row of dia.conRepartidor) {
+      const name = row['Repartidor']
+      if (!byRepartidor[name]) byRepartidor[name] = { total: 0, days: {} }
+      if (!byRepartidor[name].days[dateKey]) byRepartidor[name].days[dateKey] = { total: 0, orders: 0 }
+      byRepartidor[name].total += row['Despacho']
+      byRepartidor[name].days[dateKey].total += row['Despacho']
+      byRepartidor[name].days[dateKey].orders++
+    }
+    for (const row of dia.sinRepartidor) {
+      const asignado = asignaciones[row['Id Cuenta']]
+      if (asignado) {
+        if (!byRepartidor[asignado]) byRepartidor[asignado] = { total: 0, days: {} }
+        if (!byRepartidor[asignado].days[dateKey]) byRepartidor[asignado].days[dateKey] = { total: 0, orders: 0 }
+        byRepartidor[asignado].total += row['Despacho']
+        byRepartidor[asignado].days[dateKey].total += row['Despacho']
+        byRepartidor[asignado].days[dateKey].orders++
+      }
+    }
   }
 
-  const pendientes = dia.sinRepartidor.filter(r => !asignaciones[r['Id Cuenta']])
-  const totalDia = Object.values(totales).reduce((s, v) => s + v, 0)
+  const repartidoresOrdenados = Object.entries(byRepartidor).sort((a, b) => b[1].total - a[1].total)
+  const totalGeneral = repartidoresOrdenados.reduce((s, [, d]) => s + d.total, 0)
+
+  const todosSinAsignar = dias.flatMap(d =>
+    datos.byDay[d].sinRepartidor.map(r => ({ ...r, _dateKey: d }))
+  )
+  const pendientes = todosSinAsignar.filter(r => !asignaciones[r['Id Cuenta']])
+
+  const periodoLabel = dias.length === 1
+    ? formatDate(dias[0], { weekday: 'long', day: 'numeric', month: 'long' })
+    : `${formatDate(dias[0], { day: 'numeric', month: 'short' })} – ${formatDate(dias[dias.length - 1], { day: 'numeric', month: 'short', year: 'numeric' })}`
 
   return (
-    <main className="min-h-screen bg-gray-950 p-4 md:p-8">
-      <div className="max-w-2xl mx-auto">
+    <main className="min-h-screen bg-gray-950 p-4 md:p-8 print:bg-white print:p-0 print:min-h-0">
+      <style>{`
+        @media print {
+          @page { size: 80mm auto; margin: 4mm 6mm; }
+          nav, .no-print { display: none !important; }
+          body { font-family: 'Courier New', monospace; font-size: 11px; color: #000; }
+        }
+      `}</style>
 
-        {/* Header */}
-        <div className="mb-5 flex items-center justify-between">
+      <div className="max-w-2xl mx-auto print:max-w-none">
+
+        {/* Header — oculto al imprimir */}
+        <div className="mb-6 flex items-center justify-between no-print">
           <div>
-            <h1 className="text-2xl font-bold text-white">🛵 Repartidores</h1>
+            <h1 className="text-2xl font-bold text-white">Repartidores</h1>
             <p className="text-gray-500 text-sm mt-0.5 truncate max-w-xs">{archivo}</p>
           </div>
-          <button
-            onClick={() => { setDatos(null); setArchivo('') }}
-            className="text-gray-400 hover:text-white text-sm transition shrink-0"
-          >
-            Cargar otro →
-          </button>
-        </div>
-
-        {/* Tabs por día */}
-        {dias.length > 1 && (
-          <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
-            {dias.map(d => (
-              <button
-                key={d}
-                onClick={() => setDiaActivo(d)}
-                className={`shrink-0 px-3 py-1.5 rounded-lg text-sm font-medium transition ${
-                  diaActivo === d
-                    ? 'bg-orange-500 text-white'
-                    : 'bg-gray-800 text-gray-400 hover:text-white'
-                }`}
-              >
-                {new Date(d + 'T12:00:00Z').toLocaleDateString('es-CL', {
-                  weekday: 'short', day: 'numeric', month: 'short'
-                })}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* Encabezado del día */}
-        <div className="bg-gray-900 rounded-2xl p-4 border border-orange-500 mb-4">
-          <p className="text-orange-400 text-xs uppercase tracking-wide mb-1">
-            {new Date(diaActivo + 'T12:00:00Z').toLocaleDateString('es-CL', {
-              weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
-            })}
-          </p>
-          <div className="flex items-end justify-between">
-            <p className="text-white font-bold text-2xl">${totalDia.toLocaleString('es-CL')}</p>
-            <p className="text-gray-500 text-sm">
-              {dia.conRepartidor.length + dia.sinRepartidor.filter(r => asignaciones[r['Id Cuenta']]).length} despachos asignados
-              {pendientes.length > 0 && ` · ${pendientes.length} sin asignar`}
-            </p>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => window.print()}
+              className="bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white text-sm px-4 py-2 rounded-lg transition"
+            >
+              Imprimir
+            </button>
+            <button
+              onClick={() => { setDatos(null); setArchivo('') }}
+              className="text-gray-400 hover:text-white text-sm transition"
+            >
+              Cargar otro →
+            </button>
           </div>
         </div>
 
-        {/* Tabla repartidores */}
-        {Object.keys(totales).length > 0 && (
-          <div className="bg-gray-900 rounded-2xl border border-gray-800 mb-4 overflow-hidden">
-            <div className="px-4 py-3 border-b border-gray-800">
-              <h3 className="text-white font-semibold">Por repartidor</h3>
-            </div>
-            {Object.entries(totales)
-              .sort((a, b) => b[1] - a[1])
-              .map(([name, total]) => {
-                const ordenes = [
-                  ...dia.conRepartidor.filter(r => r['Repartidor'] === name),
-                  ...dia.sinRepartidor.filter(r => asignaciones[r['Id Cuenta']] === name),
-                ]
-                return (
-                  <div key={name} className="flex items-center justify-between px-4 py-3 border-b border-gray-800 last:border-0">
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-full bg-orange-900/60 flex items-center justify-center text-orange-400 font-bold">
+        {/* Encabezado de impresión — solo visible al imprimir */}
+        <div className="hidden print:block text-center mb-3 border-b border-black pb-2">
+          <p className="font-bold text-sm uppercase tracking-wide">Despachos Repartidores</p>
+          <p className="text-xs mt-0.5">{periodoLabel}</p>
+          <p className="text-xs text-gray-600">{archivo}</p>
+        </div>
+
+        {/* Total general — solo impresión */}
+        <div className="hidden print:flex justify-between font-bold text-sm border-b border-black pb-1 mb-3">
+          <span>TOTAL GENERAL</span>
+          <span>${totalGeneral.toLocaleString('es-CL')}</span>
+        </div>
+
+        {/* Período — pantalla */}
+        <div className="mb-4 no-print">
+          <p className="text-orange-400 text-xs uppercase tracking-wide">{periodoLabel}</p>
+          <p className="text-gray-500 text-xs mt-0.5">{repartidoresOrdenados.length} repartidor{repartidoresOrdenados.length !== 1 ? 'es' : ''} · ${totalGeneral.toLocaleString('es-CL')} total</p>
+        </div>
+
+        {/* Tarjetas por repartidor */}
+        {repartidoresOrdenados.length > 0 && (
+          <div className="space-y-3 mb-6 print:space-y-0">
+            {repartidoresOrdenados.map(([name, data]) => {
+              const totalOrders = Object.values(data.days).reduce((s, d) => s + d.orders, 0)
+              const dayEntries = Object.entries(data.days).sort(([a], [b]) => a.localeCompare(b))
+              const multipleDays = dayEntries.length > 1
+
+              return (
+                <div
+                  key={name}
+                  className="bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden print:bg-white print:border print:border-black print:rounded-none print:mb-2"
+                >
+                  {/* Fila principal del repartidor */}
+                  <div className="flex items-center justify-between px-4 py-3 print:px-0 print:py-1">
+                    <div className="flex items-center gap-3 print:gap-0">
+                      <div className="w-10 h-10 rounded-full bg-orange-900/60 flex items-center justify-center text-orange-400 font-bold text-lg shrink-0 print:hidden">
                         {name.charAt(0)}
                       </div>
                       <div>
-                        <p className="text-white font-medium">{name}</p>
-                        <p className="text-gray-500 text-xs">{ordenes.length} despacho{ordenes.length !== 1 ? 's' : ''}</p>
+                        <p className="text-white font-bold text-lg leading-tight print:text-black print:text-sm print:font-bold print:uppercase">
+                          {name}
+                        </p>
+                        <p className="text-gray-500 text-xs print:text-gray-700">
+                          {totalOrders} despacho{totalOrders !== 1 ? 's' : ''}
+                          {multipleDays && ` · ${dayEntries.length} días`}
+                        </p>
                       </div>
                     </div>
-                    <span className="text-green-400 font-bold text-xl">${total.toLocaleString('es-CL')}</span>
+                    <span className="text-green-400 font-bold text-2xl print:text-black print:text-base print:font-bold">
+                      ${data.total.toLocaleString('es-CL')}
+                    </span>
                   </div>
-                )
-              })}
+
+                  {/* Desglose por día (solo si hay más de un día) */}
+                  {multipleDays && (
+                    <div className="border-t border-gray-800 print:border-t print:border-dashed print:border-gray-400">
+                      {dayEntries.map(([dateKey, dayData]) => (
+                        <div
+                          key={dateKey}
+                          className="flex items-center justify-between px-4 py-2 border-b border-gray-800/50 last:border-0 print:px-2 print:py-0.5 print:border-0"
+                        >
+                          <span className="text-gray-400 text-sm print:text-gray-700 print:text-xs">
+                            {formatDate(dateKey, { weekday: 'short', day: 'numeric', month: 'short' })}
+                            <span className="text-gray-600 ml-2 print:text-gray-500">
+                              {dayData.orders} desp.
+                            </span>
+                          </span>
+                          <span className="text-white text-sm print:text-black print:text-xs">
+                            ${dayData.total.toLocaleString('es-CL')}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
         )}
 
-        {/* Sin repartidor asignado */}
-        {dia.sinRepartidor.length > 0 && (
-          <div className="bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden">
+        {/* Pie de impresión */}
+        <div className="hidden print:block text-center text-xs text-gray-500 border-t border-dashed border-gray-400 pt-2 mt-2">
+          {new Date().toLocaleString('es-CL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+        </div>
+
+        {/* Lista sin asignar — oculta al imprimir */}
+        {todosSinAsignar.length > 0 && (
+          <div className="bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden mb-6 no-print">
             <div className="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
               <h3 className="text-white font-semibold">Sin repartidor asignado</h3>
               {pendientes.length > 0 && (
@@ -213,45 +285,67 @@ export default function Repartidores() {
                 </span>
               )}
             </div>
-            {dia.sinRepartidor.map(row => {
+
+            {todosSinAsignar.map(row => {
               const asignado = asignaciones[row['Id Cuenta']]
+              const inputAbierto = inputsAbiertos[row['Id Cuenta']]
+
               return (
                 <div
                   key={row['Id Cuenta']}
                   className={`px-4 py-3 border-b border-gray-800 last:border-0 transition ${asignado ? 'opacity-50' : ''}`}
                 >
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
                       <p className="text-white text-sm font-medium truncate">
                         {row['Cliente'] || 'Sin nombre'}
                       </p>
                       <p className="text-gray-500 text-xs mt-0.5">
-                        {serialToTime(row['Fecha de creación'])} · {row['Cuenta']} · {row['Plataforma']}
+                        {formatDate(row['_dateKey'], { weekday: 'short', day: 'numeric', month: 'short' })}
+                        {' · '}{serialToTime(row['Fecha de creación'])}
+                        {' · '}{row['Cuenta']}
+                        {' · '}{row['Plataforma']}
                       </p>
                     </div>
+
                     <div className="flex items-center gap-2 shrink-0">
                       <span className="text-yellow-400 font-semibold">${row['Despacho'].toLocaleString('es-CL')}</span>
+
                       {asignado ? (
                         <div className="flex items-center gap-1">
                           <span className="text-green-400 text-xs bg-green-900/30 px-2 py-1 rounded-lg">{asignado}</span>
-                          <button
-                            onClick={() => setAsignaciones(prev => { const n = {...prev}; delete n[row['Id Cuenta']]; return n })}
-                            className="text-gray-600 hover:text-gray-400 text-xs"
-                          >
-                            ✕
-                          </button>
+                          <button onClick={() => desasignar(row['Id Cuenta'])} className="text-gray-600 hover:text-gray-400 text-xs">✕</button>
+                        </div>
+                      ) : inputAbierto ? (
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="text"
+                            list={`reps-${row['Id Cuenta']}`}
+                            placeholder="Nombre repartidor"
+                            autoFocus
+                            className="bg-gray-800 border border-orange-500 text-white text-xs rounded-lg px-2 py-1.5 w-36 outline-none"
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') asignar(row['Id Cuenta'], e.target.value)
+                              if (e.key === 'Escape') toggleInput(row['Id Cuenta'])
+                            }}
+                            onChange={e => {
+                              if (datos.repartidores.includes(e.target.value)) {
+                                asignar(row['Id Cuenta'], e.target.value)
+                              }
+                            }}
+                          />
+                          <datalist id={`reps-${row['Id Cuenta']}`}>
+                            {datos.repartidores.map(r => <option key={r} value={r} />)}
+                          </datalist>
+                          <button onClick={() => toggleInput(row['Id Cuenta'])} className="text-gray-600 hover:text-gray-400 text-xs">✕</button>
                         </div>
                       ) : (
-                        <select
-                          onChange={e => e.target.value && asignar(row['Id Cuenta'], e.target.value)}
-                          defaultValue=""
-                          className="bg-gray-800 border border-gray-700 text-gray-300 text-xs rounded-lg px-2 py-1.5 cursor-pointer"
+                        <button
+                          onClick={() => toggleInput(row['Id Cuenta'])}
+                          className="bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs rounded-lg px-2 py-1.5 transition"
                         >
-                          <option value="" disabled>Asignar →</option>
-                          {datos.repartidores.map(r => (
-                            <option key={r} value={r}>{r}</option>
-                          ))}
-                        </select>
+                          Asignar →
+                        </button>
                       )}
                     </div>
                   </div>
