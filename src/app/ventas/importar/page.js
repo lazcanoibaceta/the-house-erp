@@ -27,7 +27,7 @@ export default function ImportarVentas() {
         {/* Tabs */}
         <div className="flex gap-2 mb-6 bg-gray-900 p-1 rounded-xl border border-gray-800">
           {[
-            { key: 'justo', label: '📊 Justo Hub' },
+            { key: 'justo', label: '📊 Justo' },
             { key: 'peya', label: '🛵 PedidosYa' },
           ].map(t => (
             <button
@@ -52,12 +52,15 @@ export default function ImportarVentas() {
   )
 }
 
-// ─── IMPORTADOR JUSTO HUB ───────────────────────────────────────────────────
+// ─── IMPORTADOR JUSTO API ────────────────────────────────────────────────────
 
 function ImportadorJusto() {
+  const now = new Date()
+  const [year, setYear] = useState(now.getFullYear())
+  const [month, setMonth] = useState(now.getMonth() + 1)
   const [preview, setPreview] = useState(null)
-  const [workbook, setWorkbook] = useState(null)
-  const [loading, setLoading] = useState(false)
+  const [periodDates, setPeriodDates] = useState(null)
+  const [cargando, setCargando] = useState(false)
   const [guardando, setGuardando] = useState(false)
   const [success, setSuccess] = useState(false)
   const [error, setError] = useState(null)
@@ -75,146 +78,28 @@ function ImportadorJusto() {
     fetchUltimos()
   }, [success])
 
-  function parsearExcel(file) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onload = (e) => {
-        try {
-          const data = new Uint8Array(e.target.result)
-          const wb = XLSX.read(data, { type: 'array', cellDates: true })
-          resolve(wb)
-        } catch (err) { reject(err) }
-      }
-      reader.readAsArrayBuffer(file)
-    })
-  }
-
-  async function handleArchivo(e) {
-    const file = e.target.files[0]
-    if (!file) return
-    setLoading(true)
+  async function previsualizar() {
+    setCargando(true)
     setError(null)
     setPreview(null)
-    setSuccess(false)
     try {
-      const wb = await parsearExcel(file)
-      const hojasRequeridas = ['Cuentas', 'Ranking Productos', 'Descuentos']
-      for (const hoja of hojasRequeridas) {
-        if (!wb.SheetNames.includes(hoja)) throw new Error(`No se encontró la hoja "${hoja}"`)
-      }
-      setWorkbook(wb)
-      setPreview(procesarJustoHub(wb))
-    } catch (err) { setError(err.message) }
-    setLoading(false)
-  }
-
-  function procesarLocal(cuentas, descuentos, ranking, locCode) {
-    const nombreLocal = locCode === 'SF' ? 'The House - San Felipe' : 'The House - Los Andes'
-    const todasCerradas = cuentas.filter(r => r['Estado'] === 'Cerrada' && r['Local'] === nombreLocal)
-    const todasAnuladas = cuentas.filter(r => r['Estado'] === 'Anulada' && r['Local'] === nombreLocal)
-
-    const porFechaRaw = {}
-    for (const row of todasCerradas) {
-      const f = row['Fecha de creación']
-      const fecha = f instanceof Date ? f : new Date(f)
-      if (!fecha || isNaN(fecha)) continue
-      const key = fecha.toISOString().split('T')[0]
-      if (!porFechaRaw[key]) porFechaRaw[key] = 0
-      porFechaRaw[key] += parseFloat(row['Subtotal con descuento'] || 0)
+      const res = await fetch('/api/justo/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ year, month }),
+      })
+      const json = await res.json()
+      if (!json.success) throw new Error(json.error)
+      setPreview({ sf: json.sf, la: json.la })
+      setPeriodDates({ period_start: json.period_start, period_end: json.period_end })
+    } catch (err) {
+      setError(err.message)
     }
-
-    const entradasPorFecha = Object.entries(porFechaRaw).sort((a, b) => a[0].localeCompare(b[0]))
-    const mesesConteo = {}
-    for (const [fecha] of entradasPorFecha) {
-      const mes = fecha.substring(0, 7)
-      mesesConteo[mes] = (mesesConteo[mes] || 0) + 1
-    }
-    const mesPrincipal = Object.entries(mesesConteo).sort((a, b) => b[1] - a[1])[0][0]
-    const porFecha = Object.fromEntries(entradasPorFecha.filter(([f]) => f.startsWith(mesPrincipal)))
-
-    const cerradas = todasCerradas.filter(r => {
-      const f = r['Fecha de creación']
-      const fecha = f instanceof Date ? f : new Date(f)
-      if (!fecha || isNaN(fecha)) return false
-      return porFecha[fecha.toISOString().split('T')[0]] !== undefined
-    })
-
-    const totalSales = cerradas.reduce((sum, r) => sum + parseFloat(r['Subtotal con descuento'] || 0), 0)
-    const totalOrders = cerradas.length
-    const porCanal = {}
-    for (const row of cerradas) {
-      const plataforma = (row['Plataforma'] || '').toLowerCase()
-      const venta = parseFloat(row['Subtotal con descuento'] || 0)
-      if (!porCanal[plataforma]) porCanal[plataforma] = { sales: 0, orders: 0 }
-      porCanal[plataforma].sales += venta
-      porCanal[plataforma].orders += 1
-    }
-    const presencialKey = Object.keys(porCanal).find(k => k.includes('presencial')) || 'venta presencial'
-    const presencialData = porCanal[presencialKey] || { sales: 0, orders: 0 }
-    const deliverySales = totalSales - presencialData.sales
-    const deliveryOrders = totalOrders - presencialData.orders
-    const porDia = Array(7).fill(null).map(() => ({ sales: 0, orders: 0 }))
-    for (const row of cerradas) {
-      const f = row['Fecha de creación']
-      const fecha = f instanceof Date ? f : new Date(f)
-      if (!fecha || isNaN(fecha)) continue
-      const dia = (fecha.getDay() + 6) % 7
-      porDia[dia].sales += parseFloat(row['Subtotal con descuento'] || 0)
-      porDia[dia].orders += 1
-    }
-    const fechasOrdenadas = Object.entries(porFecha).sort((a, b) => b[1] - a[1])
-    const diasUnicos = Object.keys(porFecha).length
-    const descuentosLocal = descuentos.filter(r => r['Local'] === nombreLocal)
-    const totalDescuentos = descuentosLocal.reduce((sum, r) => sum + parseFloat(r['Monto'] || 0), 0)
-    const cuentasConDescuento = new Set(descuentosLocal.map(r => r['Id Cuenta'])).size
-    const subtotalBruto = cerradas.reduce((sum, r) => sum + parseFloat(r['Subtotal'] || 0), 0)
-    const topProductos = ranking.map((r, i) => ({
-      rank: i + 1,
-      product_name: r['Producto'] || r['Nombre'] || '',
-      unit_price: Math.round(parseFloat(r['Precio unitario'] || 0)),
-      units_sold: parseInt(r['Unidades vendidas'] || r['Cantidad'] || 0),
-      total_sold: Math.round(parseFloat(r['Total vendido'] || r['Total'] || 0)),
-    })).filter(p => p.product_name && p.units_sold > 0)
-
-    return {
-      locCode,
-      period_start: Object.keys(porFecha).sort()[0],
-      period_end: Object.keys(porFecha).sort().slice(-1)[0],
-      total_sales: Math.round(totalSales),
-      total_orders: totalOrders,
-      avg_ticket: totalOrders > 0 ? Math.round(totalSales / totalOrders) : 0,
-      daily_avg: Math.round(diasUnicos > 0 ? totalSales / diasUnicos : 0),
-      delivery_sales: Math.round(deliverySales),
-      delivery_orders: deliveryOrders,
-      delivery_avg_ticket: deliveryOrders > 0 ? Math.round(deliverySales / deliveryOrders) : 0,
-      presencial_sales: Math.round(presencialData.sales),
-      presencial_orders: presencialData.orders,
-      presencial_avg_ticket: presencialData.orders > 0 ? Math.round(presencialData.sales / presencialData.orders) : 0,
-      total_discounts: Math.round(totalDescuentos),
-      discount_pct: Math.round(subtotalBruto > 0 ? (totalDescuentos / subtotalBruto) * 10000 : 0) / 100,
-      orders_with_discount: cuentasConDescuento,
-      voided_orders: todasAnuladas.length,
-      voided_amount: Math.round(todasAnuladas.reduce((sum, r) => sum + parseFloat(r['Subtotal con descuento'] || 0), 0)),
-      best_day_date: fechasOrdenadas[0]?.[0] || null,
-      best_day_amount: fechasOrdenadas[0] ? Math.round(fechasOrdenadas[0][1]) : 0,
-      worst_day_date: fechasOrdenadas[fechasOrdenadas.length - 1]?.[0] || null,
-      worst_day_amount: fechasOrdenadas[fechasOrdenadas.length - 1] ? Math.round(fechasOrdenadas[fechasOrdenadas.length - 1][1]) : 0,
-      porCanal, porDia, topProductos,
-    }
-  }
-
-  function procesarJustoHub(wb) {
-    const cuentas = XLSX.utils.sheet_to_json(wb.Sheets['Cuentas'])
-    const descuentos = XLSX.utils.sheet_to_json(wb.Sheets['Descuentos'])
-    const ranking = XLSX.utils.sheet_to_json(wb.Sheets['Ranking Productos'])
-    return {
-      sf: procesarLocal(cuentas, descuentos, ranking, 'SF'),
-      la: procesarLocal(cuentas, descuentos, ranking, 'LA'),
-    }
+    setCargando(false)
   }
 
   async function guardarPeriodo() {
-    if (!preview) return
+    if (!preview || !periodDates) return
     setGuardando(true)
     setError(null)
     try {
@@ -226,24 +111,37 @@ function ImportadorJusto() {
         const locId = locationMap[locData.locCode]
         const { data: existe } = await supabase
           .from('sales_periods').select('id')
-          .eq('period_start', locData.period_start)
-          .eq('period_end', locData.period_end)
+          .eq('period_start', periodDates.period_start)
           .eq('location_id', locId).single()
         if (existe) throw new Error(`Ya existe un período para ${locData.locCode} en estas fechas`)
 
         const { data: period, error: periodError } = await supabase
           .from('sales_periods').insert({
-            period_start: locData.period_start, period_end: locData.period_end,
-            location_id: locId, total_sales: locData.total_sales,
-            total_orders: locData.total_orders, avg_ticket: locData.avg_ticket,
-            daily_avg: locData.daily_avg, delivery_sales: locData.delivery_sales,
-            delivery_orders: locData.delivery_orders, delivery_avg_ticket: locData.delivery_avg_ticket,
-            presencial_sales: locData.presencial_sales, presencial_orders: locData.presencial_orders,
-            presencial_avg_ticket: locData.presencial_avg_ticket, total_discounts: locData.total_discounts,
-            discount_pct: locData.discount_pct, orders_with_discount: locData.orders_with_discount,
-            voided_orders: locData.voided_orders, voided_amount: locData.voided_amount,
-            best_day_date: locData.best_day_date, best_day_amount: locData.best_day_amount,
-            worst_day_date: locData.worst_day_date, worst_day_amount: locData.worst_day_amount,
+            period_start: periodDates.period_start,
+            period_end: periodDates.period_end,
+            source: 'justo_api',
+            location_id: locId,
+            total_sales: locData.total_sales,
+            total_orders: locData.total_orders,
+            avg_ticket: locData.avg_ticket,
+            daily_avg: locData.daily_avg,
+            delivery_sales: locData.delivery_sales,
+            delivery_orders: locData.delivery_orders,
+            delivery_avg_ticket: locData.delivery_avg_ticket,
+            presencial_sales: locData.presencial_sales,
+            presencial_orders: locData.presencial_orders,
+            presencial_avg_ticket: locData.presencial_avg_ticket,
+            total_discounts: locData.total_discounts,
+            discount_pct: locData.discount_pct,
+            orders_with_discount: locData.orders_with_discount,
+            voided_orders: locData.voided_orders,
+            voided_amount: locData.voided_amount,
+            best_day_date: locData.best_day_date,
+            best_day_amount: locData.best_day_amount,
+            worst_day_date: locData.worst_day_date,
+            worst_day_amount: locData.worst_day_amount,
+            avg_prep_minutes: locData.avg_prep_minutes,
+            pct_orders_on_time: locData.pct_orders_on_time,
           }).select().single()
         if (periodError) throw periodError
 
@@ -266,31 +164,56 @@ function ImportadorJusto() {
         for (const p of locData.topProductos) {
           await supabase.from('sales_top_products').insert({ period_id: period.id, ...p })
         }
+        for (const [method, data] of Object.entries(locData.porPago)) {
+          await supabase.from('sales_by_payment_method').insert({
+            period_id: period.id, location_id: locId,
+            payment_method: method,
+            amount: Math.round(data.amount),
+            orders_count: data.orders,
+          })
+        }
+        for (const [name, data] of Object.entries(locData.porDescuento)) {
+          await supabase.from('sales_by_discount').insert({
+            period_id: period.id, location_id: locId,
+            discount_name: name,
+            discounted_amount: Math.round(data.amount),
+            orders_count: data.orders,
+          })
+        }
       }
       setSuccess(true)
       setPreview(null)
-      setWorkbook(null)
     } catch (err) { setError(err.message) }
     setGuardando(false)
   }
 
-  const diasSemana = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
+  const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
+  const diasSemana = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo']
+  const PLATAFORMA_LABEL = { justo: 'Justo', pedidosya: 'PedidosYa', pos: 'Presencial' }
+
   const ambos = preview ? {
     total_sales: preview.sf.total_sales + preview.la.total_sales,
     total_orders: preview.sf.total_orders + preview.la.total_orders,
-    delivery_sales: preview.sf.delivery_sales + preview.la.delivery_sales,
-    presencial_sales: preview.sf.presencial_sales + preview.la.presencial_sales,
     total_discounts: preview.sf.total_discounts + preview.la.total_discounts,
     voided_orders: preview.sf.voided_orders + preview.la.voided_orders,
     voided_amount: preview.sf.voided_amount + preview.la.voided_amount,
-    porDia: preview.sf.porDia.map((d, i) => ({ sales: d.sales + preview.la.porDia[i].sales, orders: d.orders + preview.la.porDia[i].orders })),
-    topProductos: preview.sf.topProductos,
+    porDia: preview.sf.porDia.map((d, i) => ({
+      sales: d.sales + preview.la.porDia[i].sales,
+      orders: d.orders + preview.la.porDia[i].orders,
+    })),
+    porCanal: Object.entries(preview.sf.porCanal).reduce((acc, [ch, d]) => {
+      acc[ch] = {
+        sales: d.sales + (preview.la.porCanal[ch]?.sales || 0),
+        orders: d.orders + (preview.la.porCanal[ch]?.orders || 0),
+      }
+      return acc
+    }, {}),
   } : null
 
   return (
     <div className="flex flex-col gap-4">
 
-      {/* Últimos períodos guardados */}
+      {/* Últimos períodos */}
       {ultimosPeriodos && (() => {
         const vistos = new Set()
         const unicos = ultimosPeriodos.filter(p => {
@@ -318,17 +241,37 @@ function ImportadorJusto() {
         )
       })()}
 
+      {/* Selector de mes */}
       {!preview && !success && (
         <div className="bg-gray-900 rounded-2xl p-6 border border-gray-800">
-          <label className="flex flex-col items-center gap-3 cursor-pointer">
-            <span className="text-4xl">📊</span>
-            <span className="text-white font-semibold">Seleccionar Excel mensual</span>
-            <span className="text-gray-500 text-sm">Exportado desde Justo Hub (.xlsx)</span>
-            <input type="file" accept=".xlsx,.xls" onChange={handleArchivo} className="hidden" />
-            <span className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-semibold transition">
-              {loading ? 'Procesando...' : 'Elegir archivo'}
-            </span>
-          </label>
+          <p className="text-white font-semibold mb-4">Seleccionar mes a importar</p>
+          <div className="flex gap-3 mb-5">
+            <select
+              value={month}
+              onChange={e => setMonth(Number(e.target.value))}
+              className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm"
+            >
+              {MESES.map((m, i) => (
+                <option key={i} value={i + 1}>{m}</option>
+              ))}
+            </select>
+            <select
+              value={year}
+              onChange={e => setYear(Number(e.target.value))}
+              className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm"
+            >
+              {[now.getFullYear() - 1, now.getFullYear()].map(y => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+          </div>
+          <button
+            onClick={previsualizar}
+            disabled={cargando}
+            className="w-full bg-orange-500 hover:bg-orange-600 text-white rounded-xl p-3 font-semibold transition disabled:opacity-50"
+          >
+            {cargando ? 'Consultando API de Justo...' : 'Previsualizar mes'}
+          </button>
         </div>
       )}
 
@@ -337,26 +280,28 @@ function ImportadorJusto() {
       {success && (
         <div className="bg-green-900 border border-green-700 text-green-300 rounded-xl p-4">
           <p className="font-semibold">✅ SF y LA guardados correctamente</p>
-          <button onClick={() => setSuccess(false)} className="text-green-400 text-sm mt-2 underline">Importar otro período</button>
+          <button onClick={() => setSuccess(false)} className="text-green-400 text-sm mt-2 underline">
+            Importar otro período
+          </button>
         </div>
       )}
 
-      {preview && ambos && (
+      {preview && ambos && periodDates && (
         <>
+          {/* Encabezado período */}
           <div className="bg-gray-900 rounded-2xl p-4 border border-orange-500">
             <p className="text-orange-400 text-xs uppercase tracking-wide mb-1">Período — Ambos locales</p>
-            <p className="text-white font-bold text-lg">
-              {new Date(preview.sf.period_start + 'T12:00:00').toLocaleDateString('es-CL', { month: 'long', year: 'numeric' })}
-            </p>
-            <p className="text-gray-500 text-sm">{preview.sf.period_start} → {preview.sf.period_end}</p>
+            <p className="text-white font-bold text-lg">{MESES[month - 1]} {year}</p>
+            <p className="text-gray-500 text-sm">{periodDates.period_start} → {periodDates.period_end}</p>
           </div>
 
+          {/* KPIs */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {[
               { label: 'Ventas totales', value: `$${ambos.total_sales.toLocaleString('es-CL')}`, color: 'text-white' },
               { label: 'Órdenes', value: ambos.total_orders, color: 'text-white' },
               { label: 'Ticket promedio', value: `$${ambos.total_orders > 0 ? Math.round(ambos.total_sales / ambos.total_orders).toLocaleString('es-CL') : 0}`, color: 'text-green-400' },
-              { label: 'Promedio diario', value: `$${Math.round((preview.sf.daily_avg + preview.la.daily_avg)).toLocaleString('es-CL')}`, color: 'text-blue-400' },
+              { label: 'Prom. diario', value: `$${Math.round((preview.sf.daily_avg + preview.la.daily_avg)).toLocaleString('es-CL')}`, color: 'text-blue-400' },
             ].map(kpi => (
               <div key={kpi.label} className="bg-gray-900 rounded-xl p-3 border border-gray-800">
                 <p className="text-gray-400 text-xs mb-1">{kpi.label}</p>
@@ -365,6 +310,7 @@ function ImportadorJusto() {
             ))}
           </div>
 
+          {/* Por local */}
           <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
             <h3 className="text-white font-semibold mb-3">Por local</h3>
             <div className="grid grid-cols-2 gap-4">
@@ -378,6 +324,23 @@ function ImportadorJusto() {
             </div>
           </div>
 
+          {/* Por plataforma */}
+          <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
+            <h3 className="text-white font-semibold mb-3">Por plataforma</h3>
+            <div className="flex flex-col gap-2">
+              {Object.entries(ambos.porCanal).map(([ch, d]) => (
+                <div key={ch} className="flex justify-between items-center">
+                  <span className="text-gray-300 text-sm">{PLATAFORMA_LABEL[ch] || ch}</span>
+                  <div className="flex gap-3 text-sm">
+                    <span className="text-gray-500">{d.orders} órd.</span>
+                    <span className="text-white font-semibold">${Math.round(d.sales).toLocaleString('es-CL')}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Descuentos y anulaciones */}
           <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
             <h3 className="text-white font-semibold mb-3">Descuentos y anulaciones</h3>
             <div className="grid grid-cols-2 gap-4">
@@ -393,6 +356,7 @@ function ImportadorJusto() {
             </div>
           </div>
 
+          {/* Por día de semana */}
           <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
             <h3 className="text-white font-semibold mb-3">Por día de semana</h3>
             <div className="flex flex-col gap-2">
@@ -409,13 +373,92 @@ function ImportadorJusto() {
             </div>
           </div>
 
+          {/* Tiempo de preparación */}
+          {preview.sf.avg_prep_minutes !== null && (
+            <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
+              <h3 className="text-white font-semibold mb-3">Tiempo de preparación</h3>
+              <div className="grid grid-cols-2 gap-4">
+                {[preview.sf, preview.la].map(loc => (
+                  <div key={loc.locCode}>
+                    <p className="text-orange-400 text-xs font-semibold mb-1">{loc.locCode === 'SF' ? 'San Felipe' : 'Los Andes'}</p>
+                    {loc.avg_prep_minutes !== null ? (
+                      <>
+                        <p className={`font-bold ${loc.avg_prep_minutes <= 0 ? 'text-green-400' : 'text-yellow-400'}`}>
+                          {loc.avg_prep_minutes > 0 ? `+${loc.avg_prep_minutes}` : loc.avg_prep_minutes} min promedio
+                        </p>
+                        <p className="text-gray-500 text-xs">{loc.pct_orders_on_time}% a tiempo</p>
+                      </>
+                    ) : <p className="text-gray-500 text-xs">Sin datos</p>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Métodos de pago */}
+          {Object.keys(preview.sf.porPago).length > 0 && (
+            <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
+              <h3 className="text-white font-semibold mb-3">Métodos de pago — ambos locales</h3>
+              <div className="flex flex-col gap-2">
+                {Object.entries(
+                  Object.entries({ ...preview.sf.porPago, ...preview.la.porPago }).reduce((acc, [method, d]) => {
+                    if (!acc[method]) acc[method] = { amount: 0, orders: 0 }
+                    acc[method].amount += d.amount
+                    acc[method].orders += d.orders
+                    return acc
+                  }, {})
+                ).sort((a, b) => b[1].amount - a[1].amount).map(([method, d]) => (
+                  <div key={method} className="flex justify-between items-center">
+                    <span className="text-gray-300 text-sm">{method}</span>
+                    <div className="flex gap-3 text-sm">
+                      <span className="text-gray-500">{d.orders} pagos</span>
+                      <span className="text-white font-semibold">${Math.round(d.amount).toLocaleString('es-CL')}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Descuentos por promoción */}
+          {Object.keys(preview.sf.porDescuento).length > 0 && (
+            <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
+              <h3 className="text-white font-semibold mb-3">Descuentos por promoción — ambos locales</h3>
+              <div className="flex flex-col gap-2">
+                {Object.entries(
+                  [...Object.entries(preview.sf.porDescuento), ...Object.entries(preview.la.porDescuento)]
+                    .reduce((acc, [name, d]) => {
+                      if (!acc[name]) acc[name] = { amount: 0, orders: 0 }
+                      acc[name].amount += d.amount
+                      acc[name].orders += d.orders
+                      return acc
+                    }, {})
+                ).sort((a, b) => b[1].amount - a[1].amount).map(([name, d]) => (
+                  <div key={name} className="flex justify-between items-center">
+                    <span className="text-gray-300 text-sm">{name}</span>
+                    <div className="flex gap-3 text-sm">
+                      <span className="text-gray-500">{d.orders} usos</span>
+                      <span className="text-red-400 font-semibold">-${Math.round(d.amount).toLocaleString('es-CL')}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Acciones */}
           <div className="flex gap-3">
-            <button onClick={() => { setPreview(null); setWorkbook(null) }}
-              className="flex-1 bg-gray-800 hover:bg-gray-700 text-white rounded-xl p-3 font-semibold transition">
+            <button
+              onClick={() => setPreview(null)}
+              className="flex-1 bg-gray-800 hover:bg-gray-700 text-white rounded-xl p-3 font-semibold transition"
+            >
               Cancelar
             </button>
-            <button onClick={guardarPeriodo} disabled={guardando}
-              className="flex-1 bg-orange-500 hover:bg-orange-600 text-white rounded-xl p-3 font-semibold transition disabled:opacity-50">
+            <button
+              onClick={guardarPeriodo}
+              disabled={guardando}
+              className="flex-1 bg-orange-500 hover:bg-orange-600 text-white rounded-xl p-3 font-semibold transition disabled:opacity-50"
+            >
               {guardando ? 'Guardando...' : 'Guardar período'}
             </button>
           </div>
