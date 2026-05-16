@@ -98,16 +98,20 @@ function calcularAgregados(tabs, locCode) {
       total_sold: Math.round(p.total_sold),
     }))
 
-  // Tiempo de preparación (mustBeReadyAt → readyToPickupAt, solo delivery con ambos timestamps)
-  const tabsConTiempo = activas.filter(t => t.mustBeReadyAt && t.readyToPickupAt && t.deliveryType !== 'serve')
+  // Tiempo real de preparación: desde que ingresó la orden hasta que se marcó lista
+  const tabsConTiempo = activas.filter(t => t.createdAt && t.readyToPickupAt)
   let avg_prep_minutes = null
   let pct_orders_on_time = null
   if (tabsConTiempo.length > 0) {
-    const delays = tabsConTiempo.map(t =>
-      (new Date(t.readyToPickupAt) - new Date(t.mustBeReadyAt)) / 60000
+    const preps = tabsConTiempo.map(t =>
+      (new Date(t.readyToPickupAt) - new Date(t.createdAt)) / 60000
     )
-    avg_prep_minutes = Math.round(delays.reduce((s, d) => s + d, 0) / delays.length)
-    pct_orders_on_time = Math.round((delays.filter(d => d <= 0).length / delays.length) * 10000) / 100
+    avg_prep_minutes = Math.round(preps.reduce((s, d) => s + d, 0) / preps.length)
+    // % órdenes listas antes de lo prometido (solo las que tienen mustBeReadyAt)
+    const conPromesa = tabsConTiempo.filter(t => t.mustBeReadyAt)
+    pct_orders_on_time = conPromesa.length > 0
+      ? Math.round((conPromesa.filter(t => new Date(t.readyToPickupAt) <= new Date(t.mustBeReadyAt)).length / conPromesa.length) * 10000) / 100
+      : null
   }
 
   // Métodos de pago (de tab.payments[])
