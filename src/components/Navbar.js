@@ -16,6 +16,7 @@ const allGroups = [
       { href: '/gastos/nuevo',      label: 'Gastos',          roles: ['admin_supremo', 'admin', 'cajero'] },
       { href: '/labor',             label: 'Labor',           roles: ['admin_supremo', 'admin'] },
       { href: '/ventas/importar',   label: 'Importar ventas', roles: ['admin_supremo'] },
+      { href: '/repartidores',      label: 'Repartidores',    roles: ['admin_supremo', 'admin', 'cajero'] },
     ],
   },
   {
