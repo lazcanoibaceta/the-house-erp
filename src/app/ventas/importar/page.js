@@ -62,7 +62,7 @@ function ImportadorJusto() {
   const [periodDates, setPeriodDates] = useState(null)
   const [cargando, setCargando] = useState(false)
   const [guardando, setGuardando] = useState(false)
-  const [success, setSuccess] = useState(false)
+  const [success, setSuccess] = useState(null) // null | 'guardado' | 'actualizado'
   const [error, setError] = useState(null)
   const [ultimosPeriodos, setUltimosPeriodos] = useState(null)
 
@@ -107,47 +107,66 @@ function ImportadorJusto() {
       const locationMap = {}
       for (const loc of locations) locationMap[loc.short_code] = loc.id
 
+      let huboActualizacion = false
+
       for (const locData of [preview.sf, preview.la]) {
         const locId = locationMap[locData.locCode]
+
+        const periodFields = {
+          period_start: periodDates.period_start,
+          period_end: periodDates.period_end,
+          source: 'justo_api',
+          location_id: locId,
+          total_sales: locData.total_sales,
+          total_orders: locData.total_orders,
+          avg_ticket: locData.avg_ticket,
+          daily_avg: locData.daily_avg,
+          delivery_sales: locData.delivery_sales,
+          delivery_orders: locData.delivery_orders,
+          delivery_avg_ticket: locData.delivery_avg_ticket,
+          presencial_sales: locData.presencial_sales,
+          presencial_orders: locData.presencial_orders,
+          presencial_avg_ticket: locData.presencial_avg_ticket,
+          total_discounts: locData.total_discounts,
+          discount_pct: locData.discount_pct,
+          orders_with_discount: locData.orders_with_discount,
+          voided_orders: locData.voided_orders,
+          voided_amount: locData.voided_amount,
+          best_day_date: locData.best_day_date,
+          best_day_amount: locData.best_day_amount,
+          worst_day_date: locData.worst_day_date,
+          worst_day_amount: locData.worst_day_amount,
+          avg_prep_minutes: locData.avg_prep_minutes,
+          pct_orders_on_time: locData.pct_orders_on_time,
+        }
+
         const { data: existe } = await supabase
           .from('sales_periods').select('id')
           .eq('period_start', periodDates.period_start)
           .eq('location_id', locId).single()
-        if (existe) throw new Error(`Ya existe un período para ${locData.locCode} en estas fechas`)
 
-        const { data: period, error: periodError } = await supabase
-          .from('sales_periods').insert({
-            period_start: periodDates.period_start,
-            period_end: periodDates.period_end,
-            source: 'justo_api',
-            location_id: locId,
-            total_sales: locData.total_sales,
-            total_orders: locData.total_orders,
-            avg_ticket: locData.avg_ticket,
-            daily_avg: locData.daily_avg,
-            delivery_sales: locData.delivery_sales,
-            delivery_orders: locData.delivery_orders,
-            delivery_avg_ticket: locData.delivery_avg_ticket,
-            presencial_sales: locData.presencial_sales,
-            presencial_orders: locData.presencial_orders,
-            presencial_avg_ticket: locData.presencial_avg_ticket,
-            total_discounts: locData.total_discounts,
-            discount_pct: locData.discount_pct,
-            orders_with_discount: locData.orders_with_discount,
-            voided_orders: locData.voided_orders,
-            voided_amount: locData.voided_amount,
-            best_day_date: locData.best_day_date,
-            best_day_amount: locData.best_day_amount,
-            worst_day_date: locData.worst_day_date,
-            worst_day_amount: locData.worst_day_amount,
-            avg_prep_minutes: locData.avg_prep_minutes,
-            pct_orders_on_time: locData.pct_orders_on_time,
-          }).select().single()
-        if (periodError) throw periodError
+        let periodId
+        if (existe) {
+          huboActualizacion = true
+          periodId = existe.id
+          await supabase.from('sales_periods').update(periodFields).eq('id', periodId)
+          await Promise.all([
+            supabase.from('sales_top_products').delete().eq('period_id', periodId),
+            supabase.from('sales_by_channel').delete().eq('period_id', periodId),
+            supabase.from('sales_by_weekday').delete().eq('period_id', periodId),
+            supabase.from('sales_by_payment_method').delete().eq('period_id', periodId),
+            supabase.from('sales_by_discount').delete().eq('period_id', periodId),
+          ])
+        } else {
+          const { data: period, error: periodError } = await supabase
+            .from('sales_periods').insert(periodFields).select().single()
+          if (periodError) throw periodError
+          periodId = period.id
+        }
 
         for (const [channel, data] of Object.entries(locData.porCanal)) {
           await supabase.from('sales_by_channel').insert({
-            period_id: period.id, location_id: locId, channel,
+            period_id: periodId, location_id: locId, channel,
             sales: Math.round(data.sales), orders: data.orders,
             avg_ticket: data.orders > 0 ? Math.round(data.sales / data.orders) : 0,
             pct_of_location: locData.total_sales > 0 ? Math.round((data.sales / locData.total_sales) * 10000) / 100 : 0,
@@ -157,16 +176,16 @@ function ImportadorJusto() {
           const dia = locData.porDia[i]
           if (dia.orders === 0) continue
           await supabase.from('sales_by_weekday').insert({
-            period_id: period.id, weekday: i, sales: Math.round(dia.sales),
+            period_id: periodId, weekday: i, sales: Math.round(dia.sales),
             orders: dia.orders, avg_ticket: dia.orders > 0 ? Math.round(dia.sales / dia.orders) : 0,
           })
         }
         for (const p of locData.topProductos) {
-          await supabase.from('sales_top_products').insert({ period_id: period.id, ...p })
+          await supabase.from('sales_top_products').insert({ period_id: periodId, ...p })
         }
         for (const [method, data] of Object.entries(locData.porPago)) {
           await supabase.from('sales_by_payment_method').insert({
-            period_id: period.id, location_id: locId,
+            period_id: periodId, location_id: locId,
             payment_method: method,
             amount: Math.round(data.amount),
             orders_count: data.orders,
@@ -174,14 +193,14 @@ function ImportadorJusto() {
         }
         for (const [name, data] of Object.entries(locData.porDescuento)) {
           await supabase.from('sales_by_discount').insert({
-            period_id: period.id, location_id: locId,
+            period_id: periodId, location_id: locId,
             discount_name: name,
             discounted_amount: Math.round(data.amount),
             orders_count: data.orders,
           })
         }
       }
-      setSuccess(true)
+      setSuccess(huboActualizacion ? 'actualizado' : 'guardado')
       setPreview(null)
     } catch (err) { setError(err.message) }
     setGuardando(false)
@@ -279,8 +298,10 @@ function ImportadorJusto() {
 
       {success && (
         <div className="bg-green-900 border border-green-700 text-green-300 rounded-xl p-4">
-          <p className="font-semibold">✅ SF y LA guardados correctamente</p>
-          <button onClick={() => setSuccess(false)} className="text-green-400 text-sm mt-2 underline">
+          <p className="font-semibold">
+            {success === 'actualizado' ? '🔄 SF y LA actualizados correctamente' : '✅ SF y LA guardados correctamente'}
+          </p>
+          <button onClick={() => setSuccess(null)} className="text-green-400 text-sm mt-2 underline">
             Importar otro período
           </button>
         </div>
