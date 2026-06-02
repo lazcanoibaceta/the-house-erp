@@ -23,7 +23,7 @@ export default function Recetas() {
 
   async function fetchData() {
     const [{ data: prods }, { data: ins }, { data: recs }] = await Promise.all([
-      supabase.from('products').select('id, name, category, sale_price').order('name'),
+      supabase.from('products').select('id, name, category, sale_price, active').order('name'),
       supabase.from('insumos').select('id, name, unit').order('name'),
       supabase.from('recipes').select('id, product_id, insumo_id, quantity, insumos(name, unit, avg_cost)'),
     ])
@@ -96,9 +96,16 @@ export default function Recetas() {
     setTimeout(() => setSuccess(false), 2500)
   }
 
+  async function toggleActivo(productId, activo) {
+    await supabase.from('products').update({ active: activo }).eq('id', productId)
+    await fetchData()
+  }
+
   const productoSeleccionado = products.find(p => p.id === productId)
-  const productsConReceta    = Object.keys(recetasMap)
-  const productsSinReceta    = products.filter(p => !productsConReceta.includes(p.id))
+  const activos              = products.filter(p => p.active)
+  const archivados           = products.filter(p => !p.active)
+  const productsConReceta    = Object.keys(recetasMap).filter(pid => activos.find(p => p.id === pid))
+  const productsSinReceta    = activos.filter(p => !productsConReceta.includes(p.id))
 
   return (
     <RoleGuard allowedRoles={['admin_supremo']}>
@@ -241,12 +248,21 @@ export default function Recetas() {
                           {prod?.category ? ` · ${prod.category}` : ''}
                         </p>
                       </div>
-                      <button
-                        onClick={() => cargarEdicion(pid)}
-                        className="text-orange-400 text-sm hover:text-orange-300"
-                      >
-                        ✏️ Editar
-                      </button>
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => cargarEdicion(pid)}
+                          className="text-orange-400 text-sm hover:text-orange-300"
+                        >
+                          ✏️ Editar
+                        </button>
+                        <button
+                          onClick={() => toggleActivo(pid, false)}
+                          className="text-gray-600 hover:text-red-400 text-xs transition"
+                          title="Archivar producto"
+                        >
+                          Archivar
+                        </button>
+                      </div>
                     </div>
                     <div className="px-4 pb-4 flex flex-col gap-1">
                       {recs.map((r, i) => (
@@ -285,13 +301,44 @@ export default function Recetas() {
             <p className="text-gray-600 text-xs mb-3">Haz clic para agregar su receta</p>
             <div className="flex flex-wrap gap-2">
               {productsSinReceta.map(p => (
-                <button
-                  key={p.id}
-                  onClick={() => cargarEdicion(p.id)}
-                  className="bg-gray-900 border border-gray-800 text-gray-400 text-xs px-3 py-1.5 rounded-lg hover:border-orange-500 hover:text-white transition"
-                >
-                  {p.name}
-                </button>
+                <div key={p.id} className="flex items-center gap-1">
+                  <button
+                    onClick={() => cargarEdicion(p.id)}
+                    className="bg-gray-900 border border-gray-800 text-gray-400 text-xs px-3 py-1.5 rounded-lg hover:border-orange-500 hover:text-white transition"
+                  >
+                    {p.name}
+                  </button>
+                  <button
+                    onClick={() => toggleActivo(p.id, false)}
+                    className="text-gray-700 hover:text-red-400 text-xs transition px-1"
+                    title="Archivar"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Productos archivados */}
+        {archivados.length > 0 && (
+          <div>
+            <h2 className="text-base font-semibold text-gray-600 mb-2">
+              Archivados ({archivados.length})
+            </h2>
+            <div className="flex flex-wrap gap-2">
+              {archivados.map(p => (
+                <div key={p.id} className="flex items-center gap-1.5 bg-gray-900/50 border border-gray-800 rounded-lg px-3 py-1.5">
+                  <span className="text-gray-600 text-xs">{p.name}</span>
+                  <button
+                    onClick={() => toggleActivo(p.id, true)}
+                    className="text-gray-600 hover:text-green-400 text-xs transition"
+                    title="Restaurar"
+                  >
+                    ↩
+                  </button>
+                </div>
               ))}
             </div>
           </div>

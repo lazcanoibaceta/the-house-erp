@@ -47,6 +47,7 @@ export default function Costeo() {
     const { data: products } = await supabase
       .from('products')
       .select('*')
+      .eq('active', true)
       .order('name')
 
     const { data: recipes } = await supabase
