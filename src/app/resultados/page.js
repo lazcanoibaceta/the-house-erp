@@ -388,8 +388,8 @@ export default function Resultados() {
               <FilaError
                 label="Gastos Operativos"
                 error="Sin gastos registrados este mes"
-                linkLabel="Registrar gasto"
-                linkHref="/gastos/nuevo"
+                linkLabel="Ver gastos"
+                linkHref="/gastos"
               />
             ) : (
               <FilaResultado
@@ -397,6 +397,7 @@ export default function Resultados() {
                 monto={datosVista.gastosTotal}
                 pctValor={resumen.gastosPct}
                 pctColor={colorPct(resumen.gastosPct, [10, 15])}
+                linkHref="/gastos"
                 negativo
               />
             )}
@@ -436,14 +437,19 @@ export default function Resultados() {
 
 // ── Sub-componentes ────────────────────────────────────────────────────────────
 
-function FilaResultado({ label, sublabel, monto, pctValor, pctColor, negativo = false, destacado = false, grande = false }) {
+function FilaResultado({ label, sublabel, monto, pctValor, pctColor, negativo = false, destacado = false, grande = false, linkHref = null }) {
   return (
     <div className={`flex items-center justify-between px-5 py-4 border-b border-gray-800 last:border-0 ${destacado ? 'bg-gray-800/40' : ''}`}>
       <div>
-        <p className={`${grande ? 'text-base font-bold text-white' : destacado ? 'font-semibold text-white' : 'text-gray-300'} text-sm`}>
-          {negativo && <span className="text-gray-600 mr-1">−</span>}
-          {label}
-        </p>
+        <div className="flex items-center gap-2">
+          <p className={`${grande ? 'text-base font-bold text-white' : destacado ? 'font-semibold text-white' : 'text-gray-300'} text-sm`}>
+            {negativo && <span className="text-gray-600 mr-1">−</span>}
+            {label}
+          </p>
+          {linkHref && (
+            <Link href={linkHref} className="text-gray-600 hover:text-orange-400 text-xs transition">Ver →</Link>
+          )}
+        </div>
         {sublabel && <p className="text-gray-600 text-xs mt-0.5">{sublabel}</p>}
       </div>
       <div className="text-right">

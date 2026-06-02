@@ -1,7 +1,7 @@
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
-import Navbar from "@/components/Navbar";
+import Sidebar from "@/components/Sidebar";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -27,9 +27,11 @@ export default async function RootLayout({ children }) {
       lang="es"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">
-        {user && <Navbar />}
-        {children}
+      <body className="min-h-full bg-gray-950">
+        {user && <Sidebar />}
+        <div className={user ? 'md:ml-52 pt-14 md:pt-0' : ''}>
+          {children}
+        </div>
       </body>
     </html>
   )
