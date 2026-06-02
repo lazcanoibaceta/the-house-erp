@@ -78,7 +78,7 @@ export default function Navbar() {
     if (role === 'cajero') return   // cajeros no pueden cambiar local
     setLocation(loc)
     localStorage.setItem('location', loc)
-    router.refresh()
+    window.dispatchEvent(new Event('locationChanged'))
   }
 
   async function handleLogout() {

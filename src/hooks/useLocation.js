@@ -8,8 +8,13 @@ export function useLocation() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const saved = localStorage.getItem('location') || 'SF'
-    setLocationCode(saved)
+    function readLocation() {
+      const saved = localStorage.getItem('location') || 'SF'
+      setLocationCode(saved)
+    }
+    readLocation()
+    window.addEventListener('locationChanged', readLocation)
+    return () => window.removeEventListener('locationChanged', readLocation)
   }, [])
 
   useEffect(() => {
