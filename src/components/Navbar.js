@@ -72,6 +72,7 @@ export default function Navbar() {
     if (rolLocationCode && (role === 'cajero' || role === 'admin')) {
       setLocation(rolLocationCode)
       localStorage.setItem('location', rolLocationCode)
+      window.dispatchEvent(new Event('locationChanged'))
     }
   }, [role, rolLocationCode])
 
