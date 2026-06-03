@@ -24,6 +24,42 @@ async function fetchAllTabs(storeId, fromDate, toDate) {
   return tabs
 }
 
+// Costo de packaging por unidad vendida según nombre de producto
+function getPackagingPerUnit(productName) {
+  const n = productName.toLowerCase().trim()
+
+  // Hamburguesas: caja $198 + papel $50 + papel alum $52 + pocillo $17 + sticker $20 = $337
+  if (
+    n.includes('burger') || n.includes('bacon') || n === 'big house' ||
+    n.includes('oklahoma') || n.includes('hawaiian') || n.includes('sweet berry') ||
+    n.includes('cuarto') || n === 'cheese' || n.includes('cheesinillo')
+  ) return 337
+
+  // Papitas Solas XL: básica $269 + 2 pocillos $34 = $303
+  if (n.includes('solas') && n.includes('xl')) return 303
+
+  // Papitas The House: básica $269 + 2 pocillos $34 = $303
+  if (n.includes('the house') && n.includes('papita')) return 303
+
+  // Papitas Solas (regular): básica $269 + 1 pocillo $17 = $286
+  if (n.includes('solas')) return 286
+
+  // Papitas básicas sin pocillo (Golden, Bulldog, Chihuahua, cualquier tamaño): $269
+  if (n.includes('papita') || n.startsWith('papa')) return 269
+
+  // Chicken Pop / Chicken Pops: bowl kraft $106 + pocillo $17 = $123
+  if (n.includes('chicken pop')) return 123
+
+  // Aritos de Cebolla: bowl kraft $106 + pocillo $17 = $123
+  if (n.includes('arito') || n.includes('cebolla')) return 123
+
+  // Chicken Fingers: 2 pocillos $34
+  if (n.includes('chicken finger')) return 34
+
+  // Bebidas, helados, otros
+  return 0
+}
+
 function calcularAgregados(tabs, locCode) {
   const activas = tabs.filter(t => !t.cancelledAt && t.closedAt)
   const canceladas = tabs.filter(t => t.cancelledAt)
@@ -98,6 +134,11 @@ function calcularAgregados(tabs, locCode) {
       total_sold: Math.round(p.total_sold),
     }))
 
+  // Costo total de packaging del período
+  const packagingCost = topProductos.reduce(
+    (sum, p) => sum + p.units_sold * getPackagingPerUnit(p.product_name), 0
+  )
+
   // Tiempo real de preparación: desde que ingresó la orden hasta que se marcó lista
   const tabsConTiempo = activas.filter(t => t.createdAt && t.readyToPickupAt)
   let avg_prep_minutes = null
@@ -163,6 +204,7 @@ function calcularAgregados(tabs, locCode) {
       : 0,
     avg_prep_minutes,
     pct_orders_on_time,
+    packaging_cost: Math.round(packagingCost),
     porCanal,
     porDia,
     porPago,

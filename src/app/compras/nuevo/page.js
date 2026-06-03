@@ -82,12 +82,15 @@ export default function NuevaCompra() {
       const total = parseFloat(item.total_price)
       const price = total / qty
       await supabase.from('purchase_items').insert({ purchase_id: purchase.id, insumo_id: item.insumo_id, quantity: qty, unit_price: price })
-      const { data: insumo } = await supabase.from('insumos').select('stock, avg_cost').eq('id', item.insumo_id).single()
-      const currentStock = parseFloat(insumo.stock) || 0
-      const currentCost  = parseFloat(insumo.avg_cost) || 0
+      const { data: costRow } = await supabase.from('insumo_costs').select('stock, avg_cost').eq('insumo_id', item.insumo_id).eq('location_id', locationId).single()
+      const currentStock = parseFloat(costRow?.stock) || 0
+      const currentCost  = parseFloat(costRow?.avg_cost) || 0
       const newStock     = currentStock + qty
-      const newAvgCost   = ((currentStock * currentCost) + (qty * price)) / newStock
-      await supabase.from('insumos').update({ stock: newStock, avg_cost: newAvgCost }).eq('id', item.insumo_id)
+      const newAvgCost   = newStock > 0 ? ((currentStock * currentCost) + (qty * price)) / newStock : price
+      await supabase.from('insumo_costs').upsert(
+        { insumo_id: item.insumo_id, location_id: locationId, stock: newStock, avg_cost: newAvgCost },
+        { onConflict: 'insumo_id,location_id' }
+      )
       await supabase.from('stock_movements').insert({ insumo_id: item.insumo_id, type: 'entrada', quantity: qty, reason: 'Compra a proveedor', location_id: locationId })
     }
 

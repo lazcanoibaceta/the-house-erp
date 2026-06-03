@@ -89,7 +89,7 @@ export default function Resultados() {
     // Ventas + ticket + descuentos
     const { data: ventasData } = await supabase
       .from('sales_periods')
-      .select('total_sales, total_orders, total_discounts')
+      .select('total_sales, total_orders, total_discounts, packaging_cost')
       .eq('location_id', locId)
       .gte('period_start', desde)
       .lte('period_start', hasta)
@@ -98,6 +98,7 @@ export default function Resultados() {
     const ventasNetas    = totalSales / 1.19
     const totalOrders    = (ventasData || []).reduce((s, v) => s + parseInt(v.total_orders  || 0), 0)
     const totalDiscounts = (ventasData || []).reduce((s, v) => s + parseFloat(v.total_discounts || 0), 0)
+    const packagingTotal = (ventasData || []).reduce((s, v) => s + parseFloat(v.packaging_cost || 0), 0)
     const avgTicket      = totalOrders > 0 ? totalSales / totalOrders : null
     const discountPct    = totalSales  > 0 ? (totalDiscounts / totalSales) * 100 : null
 
@@ -127,7 +128,7 @@ export default function Resultados() {
       ? gastosData.reduce((s, g) => s + parseFloat(g.amount_net || 0), 0)
       : null
 
-    return { ventasNetas, totalSales, totalOrders, totalDiscounts, avgTicket, discountPct, fc, laborAmount, gastosTotal, year, month }
+    return { ventasNetas, totalSales, totalOrders, totalDiscounts, packagingTotal, avgTicket, discountPct, fc, laborAmount, gastosTotal, year, month }
   }
 
   // ── Helpers de presentación ──────────────────────────────────────────────────
@@ -145,6 +146,8 @@ export default function Resultados() {
     const avgTicket      = totalOrders > 0 ? totalSales / totalOrders : null
     const discountPct    = totalSales  > 0 ? (totalDisc / totalSales) * 100 : null
 
+    const packaging  = (sf?.packagingTotal || 0) + (la?.packagingTotal || 0)
+
     const fcOk    = sf?.fc?.ok && la?.fc?.ok
     const fcCosto = fcOk ? (sf.fc.costoMercaderia || 0) + (la.fc.costoMercaderia || 0) : null
     const fcValue = fcOk && ventas > 0 ? (fcCosto / ventas) * 100 : null
@@ -156,6 +159,7 @@ export default function Resultados() {
 
     return {
       ventasNetas: ventas, totalSales, totalOrders, totalDiscounts: totalDisc, avgTicket, discountPct,
+      packagingTotal: packaging,
       fc: fcOk ? { ok: true, costoMercaderia: fcCosto, value: fcValue } : { ok: false, error: fcError },
       laborAmount: labor, gastosTotal: gastos,
     }
@@ -171,15 +175,16 @@ export default function Resultados() {
   // Resumen P&L + KPIs
   const resumen = (() => {
     if (!datosVista) return null
-    const { ventasNetas, fc, laborAmount, gastosTotal, avgTicket, discountPct, totalOrders } = datosVista
+    const { ventasNetas, fc, laborAmount, gastosTotal, packagingTotal, avgTicket, discountPct, totalOrders } = datosVista
     if (!ventasNetas) return null
 
-    const fcMonto   = fc?.ok ? fc.costoMercaderia : null
-    const laborPct  = laborAmount != null ? (laborAmount / ventasNetas) * 100 : null
-    const primeCost = fcMonto != null && laborAmount != null
+    const fcMonto        = fc?.ok ? fc.costoMercaderia : null
+    const packagingMonto = packagingTotal ?? 0
+    const laborPct       = laborAmount != null ? (laborAmount / ventasNetas) * 100 : null
+    const primeCost      = fcMonto != null && laborAmount != null
       ? ((fcMonto + laborAmount) / ventasNetas) * 100 : null
 
-    const resultado = ventasNetas - (fcMonto || 0) - (laborAmount || 0) - (gastosTotal || 0)
+    const resultado  = ventasNetas - (fcMonto || 0) - packagingMonto - (laborAmount || 0) - (gastosTotal || 0)
     const allPresent = fcMonto != null && laborAmount != null && gastosTotal != null
 
     return {
@@ -188,6 +193,8 @@ export default function Resultados() {
       fcError:  !fc?.ok  ? fc?.error  : null,
       fcDesde:   fc?.ok  ? fc.desde   : null,
       fcHasta:   fc?.ok  ? fc.hasta   : null,
+      packagingMonto,
+      packagingPct: ventasNetas > 0 ? (packagingMonto / ventasNetas) * 100 : 0,
       laborAmount, laborPct, primeCost,
       gastosPct: gastosTotal != null ? (gastosTotal / ventasNetas) * 100 : null,
       resultado:    allPresent ? resultado : null,
@@ -366,6 +373,14 @@ export default function Resultados() {
                 negativo
               />
             )}
+
+            <FilaResultado
+              label="Packaging"
+              monto={resumen.packagingMonto}
+              pctValor={resumen.packagingPct}
+              pctColor={colorPct(resumen.packagingPct, [4, 5])}
+              negativo
+            />
 
             {datosVista?.laborAmount == null ? (
               <FilaError

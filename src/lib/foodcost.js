@@ -6,12 +6,25 @@
  */
 async function _calcularDesdeConteos(countInicial, countFinal, locId, supabase) {
   const [{ data: itemsFinal }, { data: itemsInicial }] = await Promise.all([
-    supabase.from('inventory_count_items').select('quantity, insumos(avg_cost)').eq('count_id', countFinal.id),
-    supabase.from('inventory_count_items').select('quantity, insumos(avg_cost)').eq('count_id', countInicial.id),
+    supabase.from('inventory_count_items').select('quantity, insumo_id').eq('count_id', countFinal.id),
+    supabase.from('inventory_count_items').select('quantity, insumo_id').eq('count_id', countInicial.id),
   ])
 
-  const invFinal   = (itemsFinal   || []).reduce((s, i) => s + i.quantity * (i.insumos?.avg_cost || 0), 0)
-  const invInicial = (itemsInicial || []).reduce((s, i) => s + i.quantity * (i.insumos?.avg_cost || 0), 0)
+  const allInsumoIds = [...new Set([
+    ...(itemsFinal   || []).map(i => i.insumo_id),
+    ...(itemsInicial || []).map(i => i.insumo_id),
+  ])]
+
+  const { data: costs } = await supabase
+    .from('insumo_costs')
+    .select('insumo_id, avg_cost')
+    .eq('location_id', locId)
+    .in('insumo_id', allInsumoIds)
+
+  const costMap = Object.fromEntries((costs || []).map(c => [c.insumo_id, parseFloat(c.avg_cost) || 0]))
+
+  const invFinal   = (itemsFinal   || []).reduce((s, i) => s + i.quantity * (costMap[i.insumo_id] || 0), 0)
+  const invInicial = (itemsInicial || []).reduce((s, i) => s + i.quantity * (costMap[i.insumo_id] || 0), 0)
 
   const { data: comprasData } = await supabase
     .from('purchases')

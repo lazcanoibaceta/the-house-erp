@@ -138,6 +138,7 @@ function ImportadorJusto() {
           worst_day_amount: locData.worst_day_amount,
           avg_prep_minutes: locData.avg_prep_minutes,
           pct_orders_on_time: locData.pct_orders_on_time,
+          packaging_cost: locData.packaging_cost,
         }
 
         const { data: existe } = await supabase

@@ -67,16 +67,16 @@ export default function Navbar() {
     setLocation(saved)
   }, [])
 
-  // Si el cajero tiene local asignado, forzar su ubicación y no dejar cambiarla
+  // Si el usuario tiene local asignado en su perfil, forzar su ubicación
   useEffect(() => {
-    if (role === 'cajero' && rolLocationCode) {
+    if (rolLocationCode && (role === 'cajero' || role === 'admin')) {
       setLocation(rolLocationCode)
       localStorage.setItem('location', rolLocationCode)
     }
   }, [role, rolLocationCode])
 
   function handleLocationChange(loc) {
-    if (role === 'cajero') return   // cajeros no pueden cambiar local
+    if (role === 'cajero' || (role === 'admin' && rolLocationCode)) return
     setLocation(loc)
     localStorage.setItem('location', loc)
     window.dispatchEvent(new Event('locationChanged'))
@@ -144,8 +144,8 @@ export default function Navbar() {
 
         {/* Derecha: toggle local + logout */}
         <div className="flex items-center gap-3 shrink-0">
-          {role === 'cajero' && rolLocationCode ? (
-            /* Cajero: badge fijo, sin toggle */
+          {rolLocationCode && (role === 'cajero' || role === 'admin') ? (
+            /* Usuario con local fijo: badge sin toggle */
             <span className="bg-orange-500 text-white text-sm font-bold px-3 py-1.5 rounded-lg">
               {rolLocationCode === 'SF' ? 'San Felipe' : 'Los Andes'}
             </span>
