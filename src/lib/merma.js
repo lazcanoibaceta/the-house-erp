@@ -26,22 +26,27 @@ function normalize(s) {
 }
 
 /**
- * Suma `qty` de un insumo al mapa teórico, explotando sub-recetas a ingredientes base.
+ * Suma `qty` de un insumo a un mapa, explotando sub-recetas a ingredientes base.
  * Si el insumo es preparado (aparece en insumo_recipes), se reemplaza por sus
  * ingredientes; si no, se acumula tal cual. `depth` evita ciclos infinitos.
+ *
+ * Se usa en AMBOS lados para que todo se compare al nivel de ingrediente base:
+ *  - teórico: receta → (blend) → cortes + grasa
+ *  - real:    lo que cuentas como "blend" cuenta como cortes + grasa
+ * Así, comprar cortes + contar blend cuadra solo (el blend es solo cortes molidos).
  */
-function addInsumoTeorico(teorico, insumoId, qty, subMap, depth = 0) {
+function addExploded(map, insumoId, qty, subMap, depth = 0) {
   if (depth > 6) { // tope de seguridad ante recetas circulares
-    teorico[insumoId] = (teorico[insumoId] || 0) + qty
+    map[insumoId] = (map[insumoId] || 0) + qty
     return
   }
   const sub = subMap[insumoId]
   if (sub && sub.length > 0) {
     for (const sr of sub) {
-      addInsumoTeorico(teorico, sr.ingredient_id, qty * parseFloat(sr.quantity), subMap, depth + 1)
+      addExploded(map, sr.ingredient_id, qty * parseFloat(sr.quantity), subMap, depth + 1)
     }
   } else {
-    teorico[insumoId] = (teorico[insumoId] || 0) + qty
+    map[insumoId] = (map[insumoId] || 0) + qty
   }
 }
 
@@ -84,20 +89,31 @@ export async function getMermaForMonth(locId, year, month, supabase) {
   const countFinal   = counts[counts.length - 1]
 
   // ── 2. Consumo real por insumo: inv inicial + compras − inv final ──────────
-  const [{ data: itemsFinal }, { data: itemsInicial }, { data: comprasItems }] = await Promise.all([
-    supabase.from('inventory_count_items').select('quantity, insumo_id').eq('count_id', countFinal.id),
-    supabase.from('inventory_count_items').select('quantity, insumo_id').eq('count_id', countInicial.id),
-    supabase.from('purchase_items')
-      .select('insumo_id, quantity, purchases!inner(location_id, date)')
-      .eq('purchases.location_id', locId)
-      .gte('purchases.date', countInicial.date)
-      .lte('purchases.date', countFinal.date),
-  ])
+  const [{ data: itemsFinal }, { data: itemsInicial }, { data: comprasItems }, { data: subRecetas }] =
+    await Promise.all([
+      supabase.from('inventory_count_items').select('quantity, insumo_id').eq('count_id', countFinal.id),
+      supabase.from('inventory_count_items').select('quantity, insumo_id').eq('count_id', countInicial.id),
+      supabase.from('purchase_items')
+        .select('insumo_id, quantity, purchases!inner(location_id, date)')
+        .eq('purchases.location_id', locId)
+        .gte('purchases.date', countInicial.date)
+        .lte('purchases.date', countFinal.date),
+      supabase.from('insumo_recipes').select('insumo_id, ingredient_id, quantity'),
+    ])
 
-  const real = {} // insumo_id → unidades consumidas realmente
-  for (const it of (itemsInicial || [])) real[it.insumo_id] = (real[it.insumo_id] || 0) + parseFloat(it.quantity)
-  for (const it of (comprasItems || [])) real[it.insumo_id] = (real[it.insumo_id] || 0) + parseFloat(it.quantity)
-  for (const it of (itemsFinal   || [])) real[it.insumo_id] = (real[it.insumo_id] || 0) - parseFloat(it.quantity)
+  // Sub-recetas agrupadas por insumo preparado (ej: Blend → cortes + grasa)
+  const subMap = {}
+  for (const sr of (subRecetas || [])) {
+    if (!subMap[sr.insumo_id]) subMap[sr.insumo_id] = []
+    subMap[sr.insumo_id].push(sr)
+  }
+
+  // Real, explotando preparados a base: lo que cuentas como "blend" cuenta como
+  // cortes + grasa, igual que el teórico → comprar cortes y contar blend cuadra.
+  const real = {} // insumo_id (base) → unidades consumidas realmente
+  for (const it of (itemsInicial || [])) addExploded(real, it.insumo_id, +parseFloat(it.quantity), subMap)
+  for (const it of (comprasItems || [])) addExploded(real, it.insumo_id, +parseFloat(it.quantity), subMap)
+  for (const it of (itemsFinal   || [])) addExploded(real, it.insumo_id, -parseFloat(it.quantity), subMap)
 
   // ── 3. Ventas del período: unidades vendidas por producto ──────────────────
   const { data: ventaProductos } = await supabase
@@ -123,12 +139,11 @@ export async function getMermaForMonth(locId, year, month, supabase) {
     .lte('period_end', countFinal.date)
   const ventasNetas = (ventasData || []).reduce((s, v) => s + parseFloat(v.total_sales), 0) / 1.19
 
-  // ── 4. Recetas + productos + sub-recetas para el consumo teórico ───────────
-  const [{ data: products }, { data: recipes }, { data: subRecetas }, { data: insumos }, { data: costs }] =
+  // ── 4. Recetas + productos para el consumo teórico ─────────────────────────
+  const [{ data: products }, { data: recipes }, { data: insumos }, { data: costs }] =
     await Promise.all([
       supabase.from('products').select('id, name').eq('active', true),
       supabase.from('recipes').select('product_id, insumo_id, quantity'),
-      supabase.from('insumo_recipes').select('insumo_id, ingredient_id, quantity'),
       supabase.from('insumos').select('id, name, unit'),
       supabase.from('insumo_costs').select('insumo_id, avg_cost').eq('location_id', locId),
     ])
@@ -142,13 +157,6 @@ export async function getMermaForMonth(locId, year, month, supabase) {
   for (const r of (recipes || [])) {
     if (!recetasPorProducto[r.product_id]) recetasPorProducto[r.product_id] = []
     recetasPorProducto[r.product_id].push(r)
-  }
-
-  // Sub-recetas agrupadas por insumo preparado
-  const subMap = {}
-  for (const sr of (subRecetas || [])) {
-    if (!subMap[sr.insumo_id]) subMap[sr.insumo_id] = []
-    subMap[sr.insumo_id].push(sr)
   }
 
   // ── 5. Consumo teórico + cobertura ─────────────────────────────────────────
@@ -165,7 +173,7 @@ export async function getMermaForMonth(locId, year, month, supabase) {
     }
     unidadesCubiertas += unidades
     for (const r of receta) {
-      addInsumoTeorico(teorico, r.insumo_id, unidades * parseFloat(r.quantity), subMap)
+      addExploded(teorico, r.insumo_id, unidades * parseFloat(r.quantity), subMap)
     }
   }
 
