@@ -35,15 +35,16 @@ export default function NuevoGasto() {
   }, [])
 
   // Lógica IVA según tipo de documento
-  // - factura: usuario ingresa monto NETO → amount_net = amount, amount_total = amount * 1.19
-  // - boleta:  usuario ingresa monto TOTAL (lo que dice la boleta) → amount_total = amount, amount_net = amount / 1.19
+  // - factura: usuario ingresa monto NETO → amount_net = amount; total = amount * 1.19. IVA recuperable (crédito fiscal).
+  // - boleta:  usuario ingresa monto TOTAL. La boleta NO da crédito fiscal → el costo real es el total,
+  //            no se extrae IVA. Se trata igual que "otro": amount_net = amount_total = amount.
   // - otro:    sin IVA → amount_net = amount_total = amount
   function calcularMontos() {
     const val = parseFloat(amount) || 0
     if (documentType === 'factura') {
       return { amount_net: val, amount_total: Math.round(val * 1.19), has_iva: true }
     } else if (documentType === 'boleta') {
-      return { amount_net: Math.round(val / 1.19), amount_total: val, has_iva: true }
+      return { amount_net: val, amount_total: val, has_iva: false }
     } else {
       return { amount_net: val, amount_total: val, has_iva: false }
     }
@@ -233,12 +234,17 @@ export default function NuevoGasto() {
               />
             </div>
 
-            {/* Preview del cálculo IVA */}
-            {amount && parseFloat(amount) > 0 && documentType !== 'otro' && (
+            {/* Preview del cálculo IVA — solo factura tiene crédito fiscal */}
+            {amount && parseFloat(amount) > 0 && documentType === 'factura' && (
               <div className="bg-gray-800/50 rounded-lg p-3 flex justify-between text-xs text-gray-400">
                 <span>Neto: <span className="text-white font-medium">${montos.amount_net.toLocaleString('es-CL')}</span></span>
                 <span>IVA (19%): <span className="text-white font-medium">${(montos.amount_total - montos.amount_net).toLocaleString('es-CL')}</span></span>
                 <span>Total: <span className="text-white font-medium">${montos.amount_total.toLocaleString('es-CL')}</span></span>
+              </div>
+            )}
+            {amount && parseFloat(amount) > 0 && documentType === 'boleta' && (
+              <div className="bg-gray-800/50 rounded-lg p-3 text-xs text-gray-400">
+                Boleta: sin crédito fiscal → se registra el total <span className="text-white font-medium">${montos.amount_total.toLocaleString('es-CL')}</span> como costo (no se extrae IVA).
               </div>
             )}
           </div>

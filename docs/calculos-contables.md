@@ -12,7 +12,7 @@
 | **Precio de venta (carta)** | CON IVA (precio al cliente) | precio ÷ 1,19 |
 | **Ventas (`total_sales`)** | CON IVA | ventas ÷ 1,19 |
 | **Gasto con factura** | usuario ingresa el NETO | neto directo; total = neto × 1,19 |
-| **Gasto con boleta** | usuario ingresa el TOTAL | neto = total ÷ 1,19 |
+| **Gasto con boleta** | usuario ingresa el TOTAL | neto = total (la boleta NO da crédito fiscal → el costo es el total, no se extrae IVA) |
 | **Gasto "otro" (sin doc)** | sin IVA | neto = total |
 | **Costo laboral** | monto total del mes | sin IVA (sueldos exentos) |
 
@@ -142,4 +142,15 @@ Prime Cost % = (Food Cost + Labor) / Ventas netas × 100   (meta ≤ 60%)
 - **Food cost por inventario**: depende de la calidad de los conteos físicos. Un error de conteo distorsiona el mes.
 - **Costo laboral**: se ingresa manual; incluye lo que el dueño cargue (idealmente sueldo líquido + leyes sociales + finiquitos).
 - **Comisión delivery**: las ventas se registran brutas y la comisión se resta una vez como gasto (verificado, sin doble conteo).
-- **Packaging** es una estimación por receta de envase, no un gasto real conciliado.
+- **Packaging** es una estimación por unidad vendida, no un gasto real conciliado. **Los envases NO están como insumos en compras/inventario** (verificado: no existen insumos de caja/papel/pocillo/etc.), por lo tanto la línea estimada de Packaging es la única fuente y **no hay doble conteo con el Food Cost**. ⚠️ Si en el futuro se cargan envases como insumos, habría que eliminar la línea Packaging para no contarlos dos veces.
+
+---
+
+## 10. Observaciones de validación externa (estado)
+
+- ✅ **Boleta corregida** (antes restaba IVA indebidamente; ahora neto = total). 12 registros históricos corregidos.
+- ✅ **Packaging sin doble conteo** (envases no están en inventario).
+- ⏳ **Costos de plataforma faltantes**: confirmar comisión de **Amipass** (cobra al comercio; hoy no modelada → infla margen presencial) y la **tarifa fija de Justo** (~2 UF/local/mes, debería ir en Gastos Operativos).
+- ⏳ **Valorización de inventario (Food Cost)**: hoy ambos conteos se valorizan al `avg_cost` actual. Lo correcto es que el inventario inicial use el costo de cierre del período anterior. Con precios estables casi no afecta; con saltos de precio introduce ruido. (Requiere guardar costo histórico por conteo.)
+- ⏳ **Etiqueta del margen por producto**: el `margen %` es margen **food/bruto** (antes de packaging y comisión). Para decisiones de carta por canal (ej. PedidosYa con ~25% comisión) usar un margen post-comisión.
+- ⏳ **Débito fiscal PedidosYa**: confirmar que The House emite la boleta al SII por el precio de menú completo (y no la plataforma), para validar que la venta bruta es la base imponible correcta.
