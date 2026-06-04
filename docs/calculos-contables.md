@@ -150,7 +150,8 @@ Prime Cost % = (Food Cost + Labor) / Ventas netas × 100   (meta ≤ 60%)
 
 - ✅ **Boleta corregida** (antes restaba IVA indebidamente; ahora neto = total). 12 registros históricos corregidos.
 - ✅ **Packaging sin doble conteo** (envases no están en inventario).
-- ⏳ **Costos de plataforma faltantes**: confirmar comisión de **Amipass** (cobra al comercio; hoy no modelada → infla margen presencial) y la **tarifa fija de Justo** (~2 UF/local/mes, debería ir en Gastos Operativos).
-- ⏳ **Valorización de inventario (Food Cost)**: hoy ambos conteos se valorizan al `avg_cost` actual. Lo correcto es que el inventario inicial use el costo de cierre del período anterior. Con precios estables casi no afecta; con saltos de precio introduce ruido. (Requiere guardar costo histórico por conteo.)
-- ⏳ **Etiqueta del margen por producto**: el `margen %` es margen **food/bruto** (antes de packaging y comisión). Para decisiones de carta por canal (ej. PedidosYa con ~25% comisión) usar un margen post-comisión.
-- ⏳ **Débito fiscal PedidosYa**: confirmar que The House emite la boleta al SII por el precio de menú completo (y no la plataforma), para validar que la venta bruta es la base imponible correcta.
+- ☑️ **Amipass**: se decidió NO modelar su comisión (ventas Amipass inmateriales, ~$26k/mes). Leve sobreestimación del margen presencial, asumida.
+- ⏳ **Tarifa fija de Justo**: ~2 UF por local al mes, pagada por transferencia automática. Debe registrarse como **gasto operativo mensual** (manual en /gastos/nuevo). Aún no automatizado.
+- ⏳ **Valorización de inventario (Food Cost)**: hoy ambos conteos se valorizan al `avg_cost` actual. Lo correcto es que el inventario inicial use el costo de cierre del período anterior. Con precios estables casi no afecta; con saltos de precio introduce ruido. (Requiere guardar costo histórico por conteo. Postergado.)
+- ✅ **Etiqueta del margen por producto (corregido)**: la columna se renombró a **"Margen food"** (bruto, solo insumos) y se agregó **"Margen delivery"** = margen food − 25% (comisión aprox. PedidosYa) para decisiones de carta por canal.
+- ✅ **Débito fiscal PedidosYa (confirmado)**: The House emite la boleta al SII por el total que paga el cliente (precio de menú completo) → la venta bruta es la base imponible correcta, y la comisión como gasto aparte es el tratamiento adecuado.

@@ -149,6 +149,9 @@ export default function Costeo() {
   function colorMargen(m)    { return m >= 70 ? 'text-green-400' : m >= 60 ? 'text-yellow-400' : 'text-red-400' }
   function colorFoodCost(fc) { return fc <= 32 ? 'text-green-400' : fc <= 40 ? 'text-yellow-400' : 'text-red-400' }
 
+  // Comisión PedidosYa aprox: puntos % a restar al margen food para estimar el margen en delivery
+  const PEYA_COMISION = 25
+
   // ── Estado del caché ──────────────────────────────────────────────────────
   const diasDesdeUpdate = updatedAt
     ? Math.floor((new Date() - updatedAt) / (1000 * 60 * 60 * 24))
@@ -286,7 +289,8 @@ export default function Costeo() {
                       <th className="text-right text-gray-400 font-medium p-4">Precio neto</th>
                       <th className="text-right text-gray-400 font-medium p-4">Costo</th>
                       <th className="text-right text-gray-400 font-medium p-4">Food Cost</th>
-                      <th className="text-right text-gray-400 font-medium p-4">Margen</th>
+                      <th className="text-right text-gray-400 font-medium p-4">Margen food</th>
+                      <th className="text-right text-gray-400 font-medium p-4" title="Margen food menos 25% de comisión PedidosYa">Margen delivery</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -345,12 +349,19 @@ export default function Costeo() {
                         <td className={`p-4 text-right font-semibold ${p.sinReceta || p.sinCompras ? 'text-gray-600' : colorMargen(p.margen)}`}>
                           {p.sinReceta || p.sinCompras ? '—' : `${p.margen.toFixed(1)}%`}
                         </td>
+                        <td className="p-4 text-right text-gray-400">
+                          {p.sinReceta || p.sinCompras ? '—' : `${(p.margen - PEYA_COMISION).toFixed(1)}%`}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
             </div>
+            <p className="text-gray-600 text-xs mt-3">
+              <span className="text-gray-400">Margen food</span> = margen bruto sobre venta neta, solo costo de insumos (antes de packaging y comisiones).{' '}
+              <span className="text-gray-400">Margen delivery</span> = margen food − 25% (comisión aprox. PedidosYa), para dimensionar cuánto deja cada producto vendido por la app.
+            </p>
           </>
         )}
 
