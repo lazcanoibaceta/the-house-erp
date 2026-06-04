@@ -677,22 +677,23 @@ function ImportadorPeya() {
         }
 
         // Gasto de comisión PedidosYa = Comisión por pedido + Cargos Plus.
-        // El monto liquidado incluye IVA → amount_total = total deducido, neto = /1.19.
-        const comisionTotal = Math.round(Math.abs(d.commission) + Math.abs(d.plus))
-        if (comisionTotal > 0 && catCom?.id) {
+        // En la liquidación la comisión viene NETA (el IVA va en línea aparte) →
+        // amount_net = comisión + plus, amount_total = neto + 19%.
+        const comisionNeto = Math.round(Math.abs(d.commission) + Math.abs(d.plus))
+        if (comisionNeto > 0 && catCom?.id) {
           const gastoFields = {
             location_id: locId,
             category_id: catCom.id,
             supplier: 'PedidosYa',
             description: `Comisión PedidosYa ${preview.period_start} a ${preview.period_end}`,
-            amount_net: Math.round(comisionTotal / 1.19),
-            amount_total: comisionTotal,
+            amount_net: comisionNeto,
+            amount_total: Math.round(comisionNeto * 1.19),
             has_iva: true,
             document_type: 'factura',
             document_number: null,
             expense_date: preview.period_end,
             payment_method: 'transferencia',
-            notes: 'Generado automáticamente desde la liquidación PedidosYa (comisión + cargos plus, IVA incluido).',
+            notes: 'Generado automáticamente desde la liquidación PedidosYa (comisión + cargos plus, neto; IVA aparte).',
           }
           // Mismo criterio: actualiza el gasto de la semana si ya existía
           const { data: gastoExiste } = await supabase
@@ -872,17 +873,17 @@ function ImportadorPeya() {
           <h3 className="text-white font-semibold mb-1">Gasto de comisión que se creará</h3>
           <p className="text-gray-500 text-xs mb-3">
             Comisión + cargos plus, por local, categoría Comisiones. Entra a Resultados.
-            Se asume que el monto liquidado <span className="text-white">incluye IVA</span> (neto = total ÷ 1,19).
+            La comisión de la liquidación es <span className="text-white">neta</span>; se le suma 19% de IVA.
           </p>
           <div className="grid grid-cols-2 gap-4">
             {['SF', 'LA'].map(loc => {
               const d = preview.porLocal[loc]
-              const total = Math.round(Math.abs(d.commission) + Math.abs(d.plus))
+              const neto = Math.round(Math.abs(d.commission) + Math.abs(d.plus))
               return (
                 <div key={loc}>
                   <p className="text-orange-400 text-xs font-semibold mb-1">{loc === 'SF' ? 'San Felipe' : 'Los Andes'}</p>
-                  <p className="text-white font-bold">${Math.round(total / 1.19).toLocaleString('es-CL')} <span className="text-gray-500 text-xs font-normal">neto</span></p>
-                  <p className="text-gray-500 text-xs">${total.toLocaleString('es-CL')} c/IVA</p>
+                  <p className="text-white font-bold">${neto.toLocaleString('es-CL')} <span className="text-gray-500 text-xs font-normal">neto</span></p>
+                  <p className="text-gray-500 text-xs">${Math.round(neto * 1.19).toLocaleString('es-CL')} c/IVA</p>
                 </div>
               )
             })}
