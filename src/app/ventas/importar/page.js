@@ -633,6 +633,10 @@ function ImportadorPeya() {
       const locationMap = {}
       for (const loc of locations) locationMap[loc.short_code] = loc.id
 
+      // Categoría para el gasto de comisión (entra al P&L)
+      const { data: catCom } = await supabase
+        .from('expense_categories').select('id').eq('name', 'Comisiones').single()
+
       for (const locCode of ['SF', 'LA']) {
         const d = preview.porLocal[locCode]
         const locId = locationMap[locCode]
@@ -656,6 +660,36 @@ function ImportadorPeya() {
           pdf_net_sales: pdf.net_sales ? Math.round(parseFloat(pdf.net_sales)) : null,
           pdf_total_settled: pdf.total_settled ? Math.round(parseFloat(pdf.total_settled)) : null,
         })
+
+        // Gasto de comisión PedidosYa = Comisión por pedido + Cargos Plus.
+        // El monto liquidado incluye IVA → amount_total = total deducido, neto = /1.19.
+        const comisionTotal = Math.round(Math.abs(d.commission) + Math.abs(d.plus))
+        if (comisionTotal > 0 && catCom?.id) {
+          // Evita duplicar en el P&L si ya se cargó esta semana para este local
+          const { data: yaCargado } = await supabase
+            .from('operating_expenses')
+            .select('id')
+            .eq('location_id', locId)
+            .eq('category_id', catCom.id)
+            .eq('supplier', 'PedidosYa')
+            .eq('expense_date', preview.period_end)
+          if (!yaCargado || yaCargado.length === 0) {
+            await supabase.from('operating_expenses').insert({
+              location_id: locId,
+              category_id: catCom.id,
+              supplier: 'PedidosYa',
+              description: `Comisión PedidosYa ${preview.period_start} a ${preview.period_end}`,
+              amount_net: Math.round(comisionTotal / 1.19),
+              amount_total: comisionTotal,
+              has_iva: true,
+              document_type: 'factura',
+              document_number: null,
+              expense_date: preview.period_end,
+              payment_method: 'transferencia',
+              notes: 'Generado automáticamente desde la liquidación PedidosYa (comisión + cargos plus, IVA incluido).',
+            })
+          }
+        }
       }
 
       setSuccess(true)
@@ -805,16 +839,40 @@ function ImportadorPeya() {
 
       {success && (
         <div className="bg-green-900 border border-green-700 text-green-300 rounded-xl p-4">
-          <p className="font-semibold">✅ Liquidación PedidosYa guardada</p>
+          <p className="font-semibold">✅ Liquidación guardada + gasto de comisión creado (SF y LA)</p>
           <button onClick={() => { setSuccess(false); setPdf({ period_start: '', period_end: '', net_sales: '', commission: '', plus_charges: '', reimbursements: '', taxes: '', total_settled: '' }) }}
             className="text-green-400 text-sm mt-2 underline">Importar otra semana</button>
+        </div>
+      )}
+
+      {/* Gasto de comisión que se creará en el P&L */}
+      {!success && preview && (
+        <div className="bg-gray-900 rounded-2xl p-4 border border-orange-500/40">
+          <h3 className="text-white font-semibold mb-1">Gasto de comisión que se creará</h3>
+          <p className="text-gray-500 text-xs mb-3">
+            Comisión + cargos plus, por local, categoría Comisiones. Entra a Resultados.
+            Se asume que el monto liquidado <span className="text-white">incluye IVA</span> (neto = total ÷ 1,19).
+          </p>
+          <div className="grid grid-cols-2 gap-4">
+            {['SF', 'LA'].map(loc => {
+              const d = preview.porLocal[loc]
+              const total = Math.round(Math.abs(d.commission) + Math.abs(d.plus))
+              return (
+                <div key={loc}>
+                  <p className="text-orange-400 text-xs font-semibold mb-1">{loc === 'SF' ? 'San Felipe' : 'Los Andes'}</p>
+                  <p className="text-white font-bold">${Math.round(total / 1.19).toLocaleString('es-CL')} <span className="text-gray-500 text-xs font-normal">neto</span></p>
+                  <p className="text-gray-500 text-xs">${total.toLocaleString('es-CL')} c/IVA</p>
+                </div>
+              )
+            })}
+          </div>
         </div>
       )}
 
       {!success && preview && (
         <button onClick={guardarLiquidacion} disabled={guardando || !pdf.period_start || !pdf.period_end}
           className="bg-orange-500 hover:bg-orange-600 text-white rounded-xl p-3 font-semibold transition disabled:opacity-50">
-          {guardando ? 'Guardando...' : 'Guardar liquidación'}
+          {guardando ? 'Guardando...' : 'Guardar liquidación + gasto'}
         </button>
       )}
 
