@@ -637,11 +637,13 @@ function ImportadorPeya() {
       const { data: catCom } = await supabase
         .from('expense_categories').select('id').eq('name', 'Comisiones').single()
 
+      let huboActualizacion = false
+
       for (const locCode of ['SF', 'LA']) {
         const d = preview.porLocal[locCode]
         const locId = locationMap[locCode]
 
-        await supabase.from('platform_settlements').insert({
+        const settlementFields = {
           platform: 'pedidosya',
           period_start: preview.period_start,
           period_end: preview.period_end,
@@ -659,40 +661,55 @@ function ImportadorPeya() {
           orders_count: d.orders,
           pdf_net_sales: pdf.net_sales ? Math.round(parseFloat(pdf.net_sales)) : null,
           pdf_total_settled: pdf.total_settled ? Math.round(parseFloat(pdf.total_settled)) : null,
-        })
+        }
+
+        // Protección re-importación: si ya existe esta semana+local, actualiza en vez de duplicar
+        const { data: settleExiste } = await supabase
+          .from('platform_settlements').select('id')
+          .eq('platform', 'pedidosya')
+          .eq('period_start', preview.period_start)
+          .eq('location_id', locId)
+        if (settleExiste && settleExiste.length > 0) {
+          huboActualizacion = true
+          await supabase.from('platform_settlements').update(settlementFields).eq('id', settleExiste[0].id)
+        } else {
+          await supabase.from('platform_settlements').insert(settlementFields)
+        }
 
         // Gasto de comisión PedidosYa = Comisión por pedido + Cargos Plus.
         // El monto liquidado incluye IVA → amount_total = total deducido, neto = /1.19.
         const comisionTotal = Math.round(Math.abs(d.commission) + Math.abs(d.plus))
         if (comisionTotal > 0 && catCom?.id) {
-          // Evita duplicar en el P&L si ya se cargó esta semana para este local
-          const { data: yaCargado } = await supabase
-            .from('operating_expenses')
-            .select('id')
+          const gastoFields = {
+            location_id: locId,
+            category_id: catCom.id,
+            supplier: 'PedidosYa',
+            description: `Comisión PedidosYa ${preview.period_start} a ${preview.period_end}`,
+            amount_net: Math.round(comisionTotal / 1.19),
+            amount_total: comisionTotal,
+            has_iva: true,
+            document_type: 'factura',
+            document_number: null,
+            expense_date: preview.period_end,
+            payment_method: 'transferencia',
+            notes: 'Generado automáticamente desde la liquidación PedidosYa (comisión + cargos plus, IVA incluido).',
+          }
+          // Mismo criterio: actualiza el gasto de la semana si ya existía
+          const { data: gastoExiste } = await supabase
+            .from('operating_expenses').select('id')
             .eq('location_id', locId)
             .eq('category_id', catCom.id)
             .eq('supplier', 'PedidosYa')
             .eq('expense_date', preview.period_end)
-          if (!yaCargado || yaCargado.length === 0) {
-            await supabase.from('operating_expenses').insert({
-              location_id: locId,
-              category_id: catCom.id,
-              supplier: 'PedidosYa',
-              description: `Comisión PedidosYa ${preview.period_start} a ${preview.period_end}`,
-              amount_net: Math.round(comisionTotal / 1.19),
-              amount_total: comisionTotal,
-              has_iva: true,
-              document_type: 'factura',
-              document_number: null,
-              expense_date: preview.period_end,
-              payment_method: 'transferencia',
-              notes: 'Generado automáticamente desde la liquidación PedidosYa (comisión + cargos plus, IVA incluido).',
-            })
+          if (gastoExiste && gastoExiste.length > 0) {
+            await supabase.from('operating_expenses').update(gastoFields).eq('id', gastoExiste[0].id)
+          } else {
+            await supabase.from('operating_expenses').insert(gastoFields)
           }
         }
       }
 
-      setSuccess(true)
+      setSuccess(huboActualizacion ? 'actualizado' : true)
       setPreview(null)
       setArchivo(null)
     } catch (err) {
@@ -839,7 +856,11 @@ function ImportadorPeya() {
 
       {success && (
         <div className="bg-green-900 border border-green-700 text-green-300 rounded-xl p-4">
-          <p className="font-semibold">✅ Liquidación guardada + gasto de comisión creado (SF y LA)</p>
+          <p className="font-semibold">
+            {success === 'actualizado'
+              ? '🔄 Semana ya existía — liquidación y gasto actualizados (sin duplicar)'
+              : '✅ Liquidación guardada + gasto de comisión creado (SF y LA)'}
+          </p>
           <button onClick={() => { setSuccess(false); setPdf({ period_start: '', period_end: '', net_sales: '', commission: '', plus_charges: '', reimbursements: '', taxes: '', total_settled: '' }) }}
             className="text-green-400 text-sm mt-2 underline">Importar otra semana</button>
         </div>
