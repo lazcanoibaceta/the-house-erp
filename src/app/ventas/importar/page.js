@@ -29,6 +29,7 @@ export default function ImportarVentas() {
           {[
             { key: 'justo', label: '📊 Justo' },
             { key: 'peya', label: '🛵 PedidosYa' },
+            { key: 'mp', label: '💳 MercadoPago' },
           ].map(t => (
             <button
               key={t.key}
@@ -46,6 +47,7 @@ export default function ImportarVentas() {
 
         {tab === 'justo' && <ImportadorJusto />}
         {tab === 'peya' && <ImportadorPeya />}
+        {tab === 'mp' && <ImportadorMercadoPago />}
 
       </div>
     </main>
@@ -814,6 +816,209 @@ function ImportadorPeya() {
           className="bg-orange-500 hover:bg-orange-600 text-white rounded-xl p-3 font-semibold transition disabled:opacity-50">
           {guardando ? 'Guardando...' : 'Guardar liquidación'}
         </button>
+      )}
+
+    </div>
+  )
+}
+
+// ─── IMPORTADOR MERCADOPAGO (comisión prorrateada por ventas tarjeta) ─────────
+
+function ImportadorMercadoPago() {
+  const now = new Date()
+  const [year, setYear]   = useState(now.getFullYear())
+  const [month, setMonth] = useState(now.getMonth() + 1)
+  const [netTotal, setNetTotal]     = useState('')   // neto de la factura MercadoPago
+  const [docNumber, setDocNumber]   = useState('')
+  const [preview, setPreview]   = useState(null)
+  const [calculando, setCalculando] = useState(false)
+  const [guardando, setGuardando]   = useState(false)
+  const [success, setSuccess]   = useState(false)
+  const [yaExiste, setYaExiste] = useState(false)
+  const [error, setError]       = useState(null)
+
+  const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
+  const mm = String(month).padStart(2, '0')
+  const periodStart = `${year}-${mm}-01`
+  const lastDay = new Date(year, month, 0).getDate()
+  const expenseDate = `${year}-${mm}-${String(lastDay).padStart(2, '0')}`
+
+  async function calcularProrrateo() {
+    const neto = parseFloat(netTotal)
+    if (!neto || neto <= 0) { setError('Ingresa el monto neto de la factura.'); return }
+    setCalculando(true)
+    setError(null)
+    setPreview(null)
+    setSuccess(false)
+    try {
+      const { data: locations } = await supabase.from('locations').select('id, short_code')
+      const locMap = Object.fromEntries((locations || []).map(l => [l.short_code, l.id]))
+
+      // Ventas con Tarjeta por local en el mes (única base que procesa MercadoPago)
+      const { data: pagos } = await supabase
+        .from('sales_by_payment_method')
+        .select('amount, location_id, period_id, sales_periods!inner(period_start)')
+        .eq('payment_method', 'Tarjeta')
+        .eq('sales_periods.period_start', periodStart)
+
+      // Dedupe: sales_by_payment_method puede tener filas duplicadas →
+      // tomar una sola fila Tarjeta por período antes de sumar.
+      const tarjetaPorLocal = { SF: 0, LA: 0 }
+      const periodosVistos = new Set()
+      for (const p of (pagos || [])) {
+        if (periodosVistos.has(p.period_id)) continue
+        periodosVistos.add(p.period_id)
+        if (p.location_id === locMap.SF) tarjetaPorLocal.SF += p.amount || 0
+        else if (p.location_id === locMap.LA) tarjetaPorLocal.LA += p.amount || 0
+      }
+      const totalTarjeta = tarjetaPorLocal.SF + tarjetaPorLocal.LA
+      if (totalTarjeta === 0) {
+        throw new Error(`No hay ventas con Tarjeta importadas para ${MESES[month - 1]} ${year}. Importa primero las ventas de Justo.`)
+      }
+
+      // ¿Ya se cargó esta comisión este mes? (evita duplicar en el P&L)
+      const { data: catCom } = await supabase.from('expense_categories').select('id').eq('name', 'Comisiones').single()
+      const { data: existentes } = await supabase
+        .from('operating_expenses')
+        .select('id')
+        .eq('category_id', catCom?.id)
+        .eq('supplier', 'Mercado Pago')
+        .gte('expense_date', periodStart)
+        .lte('expense_date', expenseDate)
+      setYaExiste((existentes || []).length > 0)
+
+      const filas = ['SF', 'LA'].map(code => {
+        const tarjeta = tarjetaPorLocal[code]
+        const share   = tarjeta / totalTarjeta
+        const net     = Math.round(neto * share)
+        return { code, tarjeta, share, net, total: Math.round(net * 1.19) }
+      })
+
+      setPreview({ filas, totalTarjeta, neto, categoryId: catCom?.id, locMap })
+    } catch (err) {
+      setError(err.message)
+    }
+    setCalculando(false)
+  }
+
+  async function guardarGastos() {
+    if (!preview) return
+    setGuardando(true)
+    setError(null)
+    try {
+      const rows = preview.filas.map(f => ({
+        location_id: preview.locMap[f.code],
+        category_id: preview.categoryId || null,
+        supplier: 'Mercado Pago',
+        description: `Comisión MercadoPago ${MESES[month - 1]} ${year} (prorrateo ${(f.share * 100).toFixed(1)}% ventas tarjeta)`,
+        amount_net: f.net,
+        amount_total: f.total,
+        has_iva: true,
+        document_type: 'factura',
+        document_number: docNumber || null,
+        expense_date: expenseDate,
+        payment_method: 'transferencia',
+        notes: `Prorrateo automático sobre $${preview.totalTarjeta.toLocaleString('es-CL')} de ventas tarjeta del mes.`,
+      }))
+      const { error: insErr } = await supabase.from('operating_expenses').insert(rows)
+      if (insErr) throw insErr
+      setSuccess(true)
+      setPreview(null)
+    } catch (err) {
+      setError(err.message)
+    }
+    setGuardando(false)
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+
+      <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 text-sm text-gray-400">
+        La factura de MercadoPago es un solo total de la empresa. El sistema lo reparte entre SF y LA
+        en proporción a las <span className="text-white font-medium">ventas con Tarjeta</span> de cada local
+        (lo único que procesa MercadoPago) y crea un gasto por local en la categoría <span className="text-white font-medium">Comisiones</span>.
+      </div>
+
+      {!success && (
+        <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 flex flex-col gap-3">
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="text-gray-400 text-xs mb-1 block">Mes</label>
+              <select value={month} onChange={e => { setMonth(Number(e.target.value)); setPreview(null) }}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm">
+                {MESES.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
+              </select>
+            </div>
+            <div className="w-28">
+              <label className="text-gray-400 text-xs mb-1 block">Año</label>
+              <select value={year} onChange={e => { setYear(Number(e.target.value)); setPreview(null) }}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm">
+                {[now.getFullYear() - 1, now.getFullYear()].map(y => <option key={y} value={y}>{y}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="text-gray-400 text-xs mb-1 block">Monto neto factura (sin IVA)</label>
+              <input type="number" value={netTotal} onChange={e => { setNetTotal(e.target.value); setPreview(null) }}
+                placeholder="$191.055" className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm" />
+            </div>
+            <div className="flex-1">
+              <label className="text-gray-400 text-xs mb-1 block">N° factura (opcional)</label>
+              <input type="text" value={docNumber} onChange={e => setDocNumber(e.target.value)}
+                placeholder="2747776" className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm" />
+            </div>
+          </div>
+          <button onClick={calcularProrrateo} disabled={calculando}
+            className="bg-orange-500 hover:bg-orange-600 text-white rounded-xl p-3 font-semibold transition disabled:opacity-50">
+            {calculando ? 'Calculando...' : 'Calcular prorrateo'}
+          </button>
+        </div>
+      )}
+
+      {error && <div className="bg-red-950 border border-red-800 text-red-300 rounded-xl p-4">❌ {error}</div>}
+
+      {success && (
+        <div className="bg-green-900 border border-green-700 text-green-300 rounded-xl p-4">
+          <p className="font-semibold">✅ Comisión MercadoPago cargada a gastos (SF y LA)</p>
+          <button onClick={() => { setSuccess(false); setNetTotal(''); setDocNumber('') }}
+            className="text-green-400 text-sm mt-2 underline">Cargar otro mes</button>
+        </div>
+      )}
+
+      {preview && (
+        <>
+          {yaExiste && (
+            <div className="bg-yellow-950/40 border border-yellow-800/50 text-yellow-300 rounded-xl p-3 text-sm">
+              ⚠️ Ya existe una comisión MercadoPago cargada para {MESES[month - 1]} {year}. Si guardas, quedará duplicada en el P&L.
+            </div>
+          )}
+          <div className="bg-gray-900 rounded-2xl p-4 border border-orange-500">
+            <p className="text-orange-400 text-xs uppercase tracking-wide mb-3">
+              Prorrateo {MESES[month - 1]} {year} · base ${preview.totalTarjeta.toLocaleString('es-CL')} ventas tarjeta
+            </p>
+            <div className="grid grid-cols-2 gap-4">
+              {preview.filas.map(f => (
+                <div key={f.code} className="bg-gray-800/60 rounded-xl p-3">
+                  <p className="text-orange-400 text-sm font-semibold mb-1">{f.code === 'SF' ? 'San Felipe' : 'Los Andes'}</p>
+                  <p className="text-gray-500 text-xs">Tarjeta: ${f.tarjeta.toLocaleString('es-CL')} ({(f.share * 100).toFixed(1)}%)</p>
+                  <p className="text-white font-bold text-lg mt-1">${f.net.toLocaleString('es-CL')} <span className="text-gray-500 text-xs font-normal">neto</span></p>
+                  <p className="text-gray-500 text-xs">${f.total.toLocaleString('es-CL')} c/IVA</p>
+                </div>
+              ))}
+            </div>
+            <p className="text-gray-500 text-xs mt-3">Se crearán 2 gastos tipo factura con fecha {expenseDate}, categoría Comisiones.</p>
+          </div>
+
+          <div className="flex gap-3">
+            <button onClick={() => setPreview(null)}
+              className="flex-1 bg-gray-800 hover:bg-gray-700 text-white rounded-xl p-3 font-semibold transition">Cancelar</button>
+            <button onClick={guardarGastos} disabled={guardando}
+              className="flex-1 bg-orange-500 hover:bg-orange-600 text-white rounded-xl p-3 font-semibold transition disabled:opacity-50">
+              {guardando ? 'Guardando...' : 'Guardar gastos'}
+            </button>
+          </div>
+        </>
       )}
 
     </div>
