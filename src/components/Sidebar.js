@@ -40,6 +40,7 @@ const SECTIONS = [
       { href: '/resultados',          label: 'Resultados' },
       { href: '/ventas',              label: 'Ventas' },
       { href: '/inventario/costeo',   label: 'Costeo' },
+      { href: '/inventario/merma',    label: 'Merma' },
       { href: '/compras',             label: 'Compras' },
       { href: '/gastos',              label: 'Gastos' },
       { href: '/inventario/conteos',  label: 'Conteos' },
