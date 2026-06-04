@@ -197,17 +197,31 @@ export async function getMermaForMonth(locId, year, month, supabase) {
       merma_valor: mermaQty * avgCost,
       merma_pct:   teoricoQty > 0 ? (mermaQty / teoricoQty) * 100 : null,
     }
-  }).sort((a, b) => Math.abs(b.merma_valor) - Math.abs(a.merma_valor))
+  })
 
-  const totalTeoricoValor = todosIds.reduce((s, id) => s + (teorico[id] || 0) * (costMap[id] || 0), 0)
-  const totalRealValor    = todosIds.reduce((s, id) => s + (real[id]    || 0) * (costMap[id] || 0), 0)
+  // Sin teórico (ninguna receta lo usa) → no es merma medible. Va a una lista
+  // aparte: consumo directo (ej: mantequilla a ojo) o receta faltante.
+  const insumosMerma = filas
+    .filter(f => f.teorico > 0)
+    .sort((a, b) => Math.abs(b.merma_valor) - Math.abs(a.merma_valor))
+  const consumoDirecto = filas
+    .filter(f => f.teorico === 0 && f.real !== 0)
+    .map(f => ({ insumo_id: f.insumo_id, name: f.name, unit: f.unit, real: f.real, valor: f.merma_valor }))
+    .sort((a, b) => Math.abs(b.valor) - Math.abs(a.valor))
+
+  // Totales solo sobre lo medible (teórico > 0)
+  const totalTeoricoValor = insumosMerma.reduce((s, f) => s + f.teorico * (costMap[f.insumo_id] || 0), 0)
+  const totalRealValor    = insumosMerma.reduce((s, f) => s + f.real    * (costMap[f.insumo_id] || 0), 0)
   const totalMermaValor   = totalRealValor - totalTeoricoValor
+  const consumoDirectoValor = consumoDirecto.reduce((s, f) => s + f.valor, 0)
 
   return {
     ok: true,
     desde: countInicial.date,
     hasta: countFinal.date,
-    insumos: filas,
+    insumos: insumosMerma,
+    consumoDirecto,
+    consumoDirectoValor,
     totalTeoricoValor,
     totalRealValor,
     totalMermaValor,

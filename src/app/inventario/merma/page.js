@@ -174,6 +174,28 @@ export default function Merma() {
               </div>
             </div>
 
+            {/* Consumo directo / sin receta (no es merma medible) */}
+            {data.consumoDirecto?.length > 0 && (
+              <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 mb-6">
+                <div className="flex justify-between items-baseline mb-1">
+                  <h3 className="text-white font-semibold">Consumo directo / sin receta</h3>
+                  <span className="text-gray-400 text-sm">{clp(data.consumoDirectoValor)}</span>
+                </div>
+                <p className="text-gray-500 text-xs mb-3">
+                  Insumos que se consumen pero ninguna receta los usa (ej: mantequilla a ojo). No entran a la merma.
+                  Si alguno debería tener receta, cárgala.
+                </p>
+                <div className="flex flex-col gap-1">
+                  {data.consumoDirecto.map(f => (
+                    <div key={f.insumo_id} className="flex justify-between items-center text-sm">
+                      <span className="text-gray-300">{f.name} <span className="text-gray-600 text-xs">{f.unit}</span></span>
+                      <span className="text-gray-400">{qty(f.real)} · {clp(f.valor)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Productos vendidos sin receta (afectan la cobertura) */}
             {data.productosSinReceta.length > 0 && (
               <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
