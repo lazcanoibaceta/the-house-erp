@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase'
 import { useLocation } from '@/hooks/useLocation'
+import { getCostosPorInsumo, costoReceta } from '@/lib/costeo'
 import RoleGuard from '@/components/RoleGuard'
 
 const supabase = createClient()
@@ -54,56 +55,20 @@ export default function Costeo() {
       .from('recipes')
       .select('product_id, quantity, insumo_id')
 
-    const insumoIds = [...new Set((recipes || []).map(r => r.insumo_id))]
-    const costosPorInsumo = {}
-
-    for (const insumoId of insumoIds) {
-      const { data: ultimas } = await supabase
-        .from('purchase_items')
-        .select('unit_price, quantity, purchases!inner(location_id)')
-        .eq('insumo_id', insumoId)
-        .eq('purchases.location_id', locationId)
-        .order('created_at', { ascending: false })
-        .limit(5)
-
-      if (ultimas && ultimas.length > 0) {
-        const totalQty   = ultimas.reduce((s, i) => s + parseFloat(i.quantity), 0)
-        const totalCosto = ultimas.reduce((s, i) => s + parseFloat(i.quantity) * parseFloat(i.unit_price), 0)
-        costosPorInsumo[insumoId] = totalQty > 0 ? totalCosto / totalQty : 0
-      } else {
-        costosPorInsumo[insumoId] = 0
-      }
-    }
-
-    // Sub-recetas (salsas caseras)
-    const { data: subRecetas } = await supabase
-      .from('insumo_recipes')
-      .select('insumo_id, ingredient_id, quantity')
-
-    if (subRecetas && subRecetas.length > 0) {
-      const subMap = {}
-      subRecetas.forEach(sr => {
-        if (!subMap[sr.insumo_id]) subMap[sr.insumo_id] = []
-        subMap[sr.insumo_id].push(sr)
-      })
-      for (const [insumoId, ingredientes] of Object.entries(subMap)) {
-        const costoCalculado = ingredientes.reduce((s, sr) =>
-          s + parseFloat(sr.quantity) * (costosPorInsumo[sr.ingredient_id] || 0), 0)
-        if (costoCalculado > 0 || costosPorInsumo[insumoId] === 0)
-          costosPorInsumo[insumoId] = costoCalculado
-      }
-    }
+    // Costos por insumo (últimas 5 compras + sub-recetas) desde la librería compartida
+    const { costos, meta } = await getCostosPorInsumo(locationId, supabase)
 
     return (products || []).map(product => {
       const ingredientes = (recipes || []).filter(r => r.product_id === product.id)
       const sinReceta    = ingredientes.length === 0
-      const costo        = ingredientes.reduce((s, r) => s + r.quantity * (costosPorInsumo[r.insumo_id] || 0), 0)
+      const { costo, incompleto } = costoReceta(ingredientes, costos, meta)
       const sinCompras   = !sinReceta && costo === 0
       const precioConIva = parseFloat(product.sale_price) || 0
       const precioNeto   = precioConIva / 1.19
       const margen       = precioNeto > 0 ? ((precioNeto - costo) / precioNeto) * 100 : 0
       const foodCost     = precioNeto > 0 ? (costo / precioNeto) * 100 : 0
-      return { ...product, precioNeto, costo_calculado: costo, margen, foodCost, sinReceta, sinCompras }
+      const costoIncompleto = !sinReceta && !sinCompras && incompleto
+      return { ...product, precioNeto, costo_calculado: costo, margen, foodCost, sinReceta, sinCompras, costoIncompleto }
     })
   }
 
@@ -296,6 +261,7 @@ export default function Costeo() {
                           {p.name}
                           {p.sinReceta  && <span className="ml-2 text-xs bg-gray-800 text-gray-400 px-2 py-0.5 rounded-full">sin receta</span>}
                           {p.sinCompras && <span className="ml-2 text-xs bg-yellow-900/50 text-yellow-400 px-2 py-0.5 rounded-full">sin compras</span>}
+                          {p.costoIncompleto && <span className="ml-2 text-xs bg-orange-900/50 text-orange-400 px-2 py-0.5 rounded-full" title="Algún insumo no tiene compras registradas en ningún local">costo parcial</span>}
                         </td>
 
                         {/* Precio c/IVA — editable */}

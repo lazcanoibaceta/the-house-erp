@@ -2,15 +2,19 @@
 
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase'
+import { useLocation } from '@/hooks/useLocation'
+import { getCostosPorInsumo } from '@/lib/costeo'
 import Link from 'next/link'
 import RoleGuard from '@/components/RoleGuard'
 
 const supabase = createClient()
 
 export default function Recetas() {
+  const { locationCode, locationId } = useLocation()
   const [products, setProducts]     = useState([])
   const [insumos, setInsumos]       = useState([])
   const [recetasMap, setRecetasMap] = useState({}) // product_id → [{insumo_id, quantity, nombre, unit}]
+  const [costos, setCostos]         = useState({}) // insumo_id → costo (últimas 5 compras + sub-recetas)
 
   const [productId, setProductId]   = useState('')
   const [lineas, setLineas]         = useState([{ insumo_id: '', quantity: '' }])
@@ -20,6 +24,12 @@ export default function Recetas() {
   useEffect(() => {
     fetchData()
   }, [])
+
+  // Costos por local (mismo cálculo que la pestaña de Costeo)
+  useEffect(() => {
+    if (!locationId) return
+    getCostosPorInsumo(locationId, supabase).then(({ costos }) => setCostos(costos))
+  }, [locationId])
 
   async function fetchData() {
     const [{ data: prods }, { data: ins }, { data: recs }] = await Promise.all([
@@ -118,7 +128,10 @@ export default function Recetas() {
             ← Inventario
           </Link>
           <h1 className="text-2xl font-bold text-white">🍔 Recetas de Productos</h1>
-          <p className="text-gray-500 text-sm mt-1">Edita los insumos y gramajes de cada producto</p>
+          <p className="text-gray-500 text-sm mt-1">
+            Edita los insumos y gramajes de cada producto
+            {locationCode && <> · costos según últimas 5 compras de <span className="text-gray-400 font-medium">{locationCode}</span></>}
+          </p>
         </div>
 
         {/* Formulario editor */}
@@ -265,22 +278,25 @@ export default function Recetas() {
                       </div>
                     </div>
                     <div className="px-4 pb-4 flex flex-col gap-1">
-                      {recs.map((r, i) => (
-                        <div key={i} className="flex justify-between text-sm text-gray-400">
-                          <span>{r.nombre}</span>
-                          <div className="flex items-center gap-3 tabular-nums">
-                            <span className="text-gray-500">{r.quantity} {r.unit}</span>
-                            <span className="text-gray-400">
-                              ${Math.round(r.quantity * r.avg_cost).toLocaleString('es-CL')}
-                            </span>
+                      {recs.map((r, i) => {
+                        const costoUnit = costos[r.insumo_id] ?? r.avg_cost
+                        return (
+                          <div key={i} className="flex justify-between text-sm text-gray-400">
+                            <span>{r.nombre}</span>
+                            <div className="flex items-center gap-3 tabular-nums">
+                              <span className="text-gray-500">{r.quantity} {r.unit}</span>
+                              <span className="text-gray-400">
+                                ${Math.round(r.quantity * costoUnit).toLocaleString('es-CL')}
+                              </span>
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        )
+                      })}
                       {recs.length > 0 && (
                         <div className="flex justify-between text-sm font-semibold text-white border-t border-gray-800 mt-1 pt-1">
                           <span>Costo total</span>
                           <span className="tabular-nums">
-                            ${Math.round(recs.reduce((s, r) => s + r.quantity * r.avg_cost, 0)).toLocaleString('es-CL')}
+                            ${Math.round(recs.reduce((s, r) => s + r.quantity * (costos[r.insumo_id] ?? r.avg_cost), 0)).toLocaleString('es-CL')}
                           </span>
                         </div>
                       )}
