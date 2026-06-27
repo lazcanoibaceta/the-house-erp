@@ -62,8 +62,8 @@ function buildResolver(costosBase, subMap, baseMeta) {
         res = { cost, incompleto }
       }
     } else {
-      // Insumo base: costo desde compras.
-      res = { cost: costosBase[id] || 0, incompleto: !baseMeta[id]?.hasPurchases }
+      // Insumo base: costo desde compras (o costo manual de respaldo).
+      res = { cost: costosBase[id] || 0, incompleto: !baseMeta[id]?.hasCost }
     }
 
     cache[id] = res
@@ -105,6 +105,15 @@ export async function getCostosPorInsumo(locationId, supabase) {
     referenced.add(sr.ingredient_id)
   })
 
+  // Costo manual de respaldo (insumos.avg_cost): para insumos que no se compran
+  // sueltos (ej: Azúcar, Chipotle) y que de otro modo quedarían en $0.
+  const { data: manualRows } = await supabase
+    .from('insumos')
+    .select('id, avg_cost')
+    .in('id', [...referenced])
+  const manualCost = {}
+  ;(manualRows || []).forEach(r => { manualCost[r.id] = parseFloat(r.avg_cost) || 0 })
+
   // Costo directo (desde compras) de TODOS los insumos referenciados.
   // Incluye los preparados (blend/salsas): si se cargan enteros sirve de fallback
   // cuando la sub-receta por cortes está incompleta.
@@ -134,8 +143,15 @@ export async function getCostosPorInsumo(locationId, supabase) {
     }
 
     const { cost, hasPurchases } = avgUltimas5(items)
-    costosBase[id] = cost
-    baseMeta[id] = { hasPurchases, usedFallback }
+    // Sin compras en ningún local → caer al costo manual si existe
+    let finalCost = cost
+    let usedManual = false
+    if (!hasPurchases && manualCost[id] > 0) {
+      finalCost = manualCost[id]
+      usedManual = true
+    }
+    costosBase[id] = finalCost
+    baseMeta[id] = { hasPurchases, hasCost: hasPurchases || usedManual, usedFallback, usedManual }
   }
 
   // Resolver costos (sub-recetas armadas desde sus ingredientes, con anidación)
@@ -150,6 +166,7 @@ export async function getCostosPorInsumo(locationId, supabase) {
       incompleto:   r.incompleto,
       esSubReceta:  !!subMap[id],
       usedFallback: baseMeta[id]?.usedFallback || false,
+      usedManual:   baseMeta[id]?.usedManual || false,
     }
   }
 
