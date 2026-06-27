@@ -25,6 +25,7 @@ const SECTIONS = [
     links: [
       { href: '/compras/nuevo',     label: 'Nueva compra',              roles: ['admin_supremo', 'admin', 'cajero'] },
       { href: '/inventario/conteo', label: 'Nuevo conteo',              roles: ['admin_supremo', 'admin', 'cajero'] },
+      { href: '/inventario/traspasos', label: 'Traspaso entre locales', roles: ['admin_supremo', 'admin'] },
       { href: '/gastos/nuevo',      label: 'Nuevo gasto',               roles: ['admin_supremo', 'admin', 'cajero'] },
       { href: '/labor',             label: 'Costo laboral',             roles: ['admin_supremo', 'admin'] },
       { href: '/ventas/importar',   label: 'Importar ventas',           roles: ['admin_supremo'] },
