@@ -14,6 +14,7 @@ const allGroups = [
       { href: '/compras',           label: 'Compras',         roles: ['admin_supremo', 'admin', 'cajero'] },
       { href: '/inventario/conteo',  label: 'Conteo',          roles: ['admin_supremo', 'admin', 'cajero'] },
       { href: '/inventario/conteos', label: 'Conteos',        roles: ['admin_supremo', 'admin', 'cajero'] },
+      { href: '/inventario/traspasos', label: 'Traspasos',    roles: ['admin_supremo', 'admin'] },
       { href: '/gastos/nuevo',       label: 'Gastos',         roles: ['admin_supremo', 'admin', 'cajero'] },
       { href: '/labor',             label: 'Labor',           roles: ['admin_supremo', 'admin'] },
       { href: '/ventas/importar',   label: 'Importar ventas', roles: ['admin_supremo'] },
