@@ -6,8 +6,17 @@ import { useLocation } from '@/hooks/useLocation'
 
 const supabase = createClient()
 
+const LOCATION_NAMES = { SF: 'San Felipe', LA: 'Los Andes' }
+
 export default function Conteo() {
-  const { locationCode, locationId, loading: locationLoading } = useLocation()
+  const { locationCode, loading: locationLoading } = useLocation()
+
+  // Local EXPLÍCITO del formulario (mismo fix que compras/nuevo): parte con el
+  // local activo pero queda fijado acá, visible y editable — evita guardar el
+  // conteo en el local equivocado si el toggle cambió en otra pestaña
+  const [locations, setLocations] = useState([])
+  const [formLoc, setFormLoc] = useState('')
+
   const [insumos, setInsumos] = useState([])
   const [counts, setCounts] = useState({})
   const [date, setDate] = useState(new Date().toISOString().split('T')[0])
@@ -16,13 +25,21 @@ export default function Conteo() {
   const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState(false)
 
+  const formLocId = locations.find(l => l.short_code === formLoc)?.id || null
+
   useEffect(() => {
     async function fetchInsumos() {
       const { data } = await supabase.from('insumos').select('*').order('name')
       setInsumos(data || [])
     }
     fetchInsumos()
+    supabase.from('locations').select('id, short_code').then(({ data }) => setLocations(data || []))
   }, [])
+
+  // Inicializa el local del formulario con el local activo (solo una vez)
+  useEffect(() => {
+    if (!locationLoading && !formLoc && locationCode) setFormLoc(locationCode)
+  }, [locationLoading, locationCode, formLoc])
 
   function updateCount(id, value) {
     setCounts({ ...counts, [id]: value })
@@ -30,11 +47,35 @@ export default function Conteo() {
 
   async function handleSubmit(e) {
     e.preventDefault()
+    if (!formLocId) return
+
+    // Aviso si ya hay un cierre de mes cercano (±5 días) en este local:
+    // dos cierres pegados distorsionan el food cost y la merma
+    if (countType === 'cierre_mes') {
+      const d = new Date(date + 'T00:00:00')
+      const desde = new Date(d.getTime() - 5 * 86400000).toISOString().split('T')[0]
+      const hasta = new Date(d.getTime() + 5 * 86400000).toISOString().split('T')[0]
+      const { data: cercanos } = await supabase
+        .from('inventory_counts')
+        .select('date')
+        .eq('location_id', formLocId)
+        .eq('count_type', 'cierre_mes')
+        .gte('date', desde)
+        .lte('date', hasta)
+      if (cercanos && cercanos.length > 0) {
+        const ok = window.confirm(
+          `⚠️ Ya existe un conteo de cierre de mes en ${LOCATION_NAMES[formLoc]} con fecha ${cercanos[0].date}.\n\n` +
+          `¿Seguro que quieres guardar OTRO cierre de mes el ${date}? Dos cierres pegados distorsionan el food cost.`
+        )
+        if (!ok) return
+      }
+    }
+
     setLoading(true)
 
     const { data: count, error } = await supabase
       .from('inventory_counts')
-      .insert({ date, notes, location_id: locationId, count_type: countType })
+      .insert({ date, notes, location_id: formLocId, count_type: countType })
       .select()
       .single()
 
@@ -79,9 +120,20 @@ export default function Conteo() {
             <h1 className="text-2xl font-bold text-white">📋 Conteo de Inventario</h1>
             <p className="text-gray-500 text-sm mt-1">Ingresa solo los insumos que contaste. Los demás no se modifican.</p>
           </div>
-          <span className="bg-orange-500 text-white text-sm font-bold px-3 py-1 rounded-lg">
-            {locationCode}
-          </span>
+          <div className="flex rounded-lg overflow-hidden border border-gray-700">
+            {['SF', 'LA'].map(code => (
+              <button
+                key={code}
+                type="button"
+                onClick={() => setFormLoc(code)}
+                className={`px-3 py-1.5 text-sm font-bold transition ${
+                  formLoc === code ? 'bg-orange-500 text-white' : 'bg-gray-900 text-gray-500 hover:text-gray-300'
+                }`}
+              >
+                {LOCATION_NAMES[code]}
+              </button>
+            ))}
+          </div>
         </div>
 
         {success && (
@@ -153,10 +205,10 @@ export default function Conteo() {
 
           <button
             type="submit"
-            disabled={loading || locationLoading}
+            disabled={loading || !formLocId}
             className="bg-orange-500 hover:bg-orange-600 text-white rounded-xl p-3 font-semibold transition disabled:opacity-50"
           >
-            {loading ? 'Guardando...' : 'Guardar conteo'}
+            {loading ? 'Guardando...' : `Guardar conteo en ${LOCATION_NAMES[formLoc] || '...'}`}
           </button>
 
         </form>
