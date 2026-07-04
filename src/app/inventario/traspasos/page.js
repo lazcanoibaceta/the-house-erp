@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase'
 import { useLocation } from '@/hooks/useLocation'
 import RoleGuard from '@/components/RoleGuard'
+import DateInput from '@/components/DateInput'
 import Link from 'next/link'
 
 const supabase = createClient()
@@ -226,8 +227,7 @@ function TraspasosContent() {
             <div className="text-center text-gray-500 text-sm">
               {codeOf(fromId)} <span className="text-orange-400">→</span> {codeOf(toId)}
             </div>
-            <input type="date" value={date} onChange={e => setDate(e.target.value)} required
-              className="bg-gray-800 border border-gray-700 rounded-lg p-2 text-white" />
+            <DateInput value={date} onChange={setDate} required />
           </div>
 
           {/* Insumos */}

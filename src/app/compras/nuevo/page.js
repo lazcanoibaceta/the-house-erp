@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase'
 import { useLocation } from '@/hooks/useLocation'
+import { useRole } from '@/hooks/useRole'
+import DateInput from '@/components/DateInput'
 import Link from 'next/link'
 
 const supabase = createClient()
@@ -42,6 +44,14 @@ export default function NuevaCompra() {
   useEffect(() => {
     if (!locationLoading && !formLoc && locationCode) setFormLoc(locationCode)
   }, [locationLoading, locationCode, formLoc])
+
+  // Cajeros: local SIEMPRE fijo al suyo, aunque el rol cargue después de que
+  // el formulario ya arrancó con el local por defecto (bug proveedores LA)
+  const { role, locationCode: roleLocationCode } = useRole()
+  const esCajero = role === 'cajero' && !!roleLocationCode
+  useEffect(() => {
+    if (esCajero && formLoc !== roleLocationCode) setFormLoc(roleLocationCode)
+  }, [esCajero, roleLocationCode, formLoc])
 
   useEffect(() => {
     if (!formLocId) return
@@ -129,20 +139,26 @@ export default function NuevaCompra() {
           </Link>
           <div className="flex items-center justify-between">
             <h1 className="text-2xl font-bold text-white">🛒 Registrar Compra</h1>
-            <div className="flex rounded-lg overflow-hidden border border-gray-700">
-              {['SF', 'LA'].map(code => (
-                <button
-                  key={code}
-                  type="button"
-                  onClick={() => { setFormLoc(code); setSupplierId('') }}
-                  className={`px-3 py-1.5 text-sm font-bold transition ${
-                    formLoc === code ? 'bg-orange-500 text-white' : 'bg-gray-900 text-gray-500 hover:text-gray-300'
-                  }`}
-                >
-                  {LOCATION_NAMES[code]}
-                </button>
-              ))}
-            </div>
+            {esCajero ? (
+              <span className="bg-orange-500 text-white text-sm font-bold px-3 py-1.5 rounded-lg">
+                {LOCATION_NAMES[formLoc] || formLoc}
+              </span>
+            ) : (
+              <div className="flex rounded-lg overflow-hidden border border-gray-700">
+                {['SF', 'LA'].map(code => (
+                  <button
+                    key={code}
+                    type="button"
+                    onClick={() => { setFormLoc(code); setSupplierId('') }}
+                    className={`px-3 py-1.5 text-sm font-bold transition ${
+                      formLoc === code ? 'bg-orange-500 text-white' : 'bg-gray-900 text-gray-500 hover:text-gray-300'
+                    }`}
+                  >
+                    {LOCATION_NAMES[code]}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
@@ -167,7 +183,7 @@ export default function NuevaCompra() {
             <button type="button" onClick={() => setShowAddSupplier(true)} className="text-orange-400 text-xs hover:text-orange-300 text-left transition">
               + Agregar proveedor nuevo
             </button>
-            <input type="date" value={date} onChange={e => setDate(e.target.value)} required className="bg-gray-800 border border-gray-700 rounded-lg p-2 text-white" />
+            <DateInput value={date} onChange={setDate} required />
           </div>
 
           <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 flex flex-col gap-3">

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase'
 import { useLocation } from '@/hooks/useLocation'
+import DateInput from '@/components/DateInput'
 import Link from 'next/link'
 
 const supabase = createClient()
@@ -262,7 +263,7 @@ export default function Compras() {
                 <select value={editSupplierId} onChange={e => setEditSupplierId(e.target.value)} className="bg-gray-800 border border-gray-700 rounded-lg p-2 text-white">
                   {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
-                <input type="date" value={editDate} onChange={e => setEditDate(e.target.value)} className="bg-gray-800 border border-gray-700 rounded-lg p-2 text-white" />
+                <DateInput value={editDate} onChange={setEditDate} />
               </div>
               <div className="flex flex-col gap-3">
                 <p className="text-gray-400 text-sm font-medium">Productos</p>

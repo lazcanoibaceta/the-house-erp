@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase'
 import { useLocation } from '@/hooks/useLocation'
+import DateInput from '@/components/DateInput'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 
@@ -131,13 +132,7 @@ export default function NuevoGasto() {
             <div className="flex gap-3">
               <div className="flex-1">
                 <label className="text-gray-400 text-xs mb-1 block">Fecha</label>
-                <input
-                  type="date"
-                  value={expenseDate}
-                  onChange={e => setExpenseDate(e.target.value)}
-                  required
-                  className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white text-sm"
-                />
+                <DateInput value={expenseDate} onChange={setExpenseDate} required />
               </div>
               <div className="flex-1">
                 <label className="text-gray-400 text-xs mb-1 block">Tipo documento</label>

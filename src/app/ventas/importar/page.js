@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import * as XLSX from 'xlsx'
 import { createClient } from '@/lib/supabase'
 import Link from 'next/link'
+import DateInput from '@/components/DateInput'
 
 const supabase = createClient()
 
@@ -817,13 +818,11 @@ function ImportadorPeya() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-gray-400 text-xs mb-1 block">Fecha inicio</label>
-                <input type="date" value={pdf.period_start} onChange={e => updatePdf('period_start', e.target.value)}
-                  className="bg-gray-800 border border-gray-700 rounded-lg p-2 text-white text-sm w-full" />
+                <DateInput value={pdf.period_start} onChange={v => updatePdf('period_start', v)} />
               </div>
               <div>
                 <label className="text-gray-400 text-xs mb-1 block">Fecha fin</label>
-                <input type="date" value={pdf.period_end} onChange={e => updatePdf('period_end', e.target.value)}
-                  className="bg-gray-800 border border-gray-700 rounded-lg p-2 text-white text-sm w-full" />
+                <DateInput value={pdf.period_end} onChange={v => updatePdf('period_end', v)} />
               </div>
               {[
                 { key: 'net_sales', label: 'Ventas netas (PDF)' },

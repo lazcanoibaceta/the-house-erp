@@ -189,6 +189,10 @@ export default function Sidebar() {
     if (role === 'cajero' && rolLocationCode) {
       setLocation(rolLocationCode)
       localStorage.setItem('location', rolLocationCode)
+      // Avisar a useLocation de las páginas ya montadas — sin esto, un
+      // formulario abierto antes de que cargue el rol se queda con el local
+      // por defecto (SF) y muestra proveedores del local equivocado
+      window.dispatchEvent(new Event('locationChanged'))
     }
   }, [role, rolLocationCode])
 

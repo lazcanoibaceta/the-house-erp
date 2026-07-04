@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase'
 import { useLocation } from '@/hooks/useLocation'
+import { useRole } from '@/hooks/useRole'
+import DateInput from '@/components/DateInput'
 
 const supabase = createClient()
 
@@ -40,6 +42,13 @@ export default function Conteo() {
   useEffect(() => {
     if (!locationLoading && !formLoc && locationCode) setFormLoc(locationCode)
   }, [locationLoading, locationCode, formLoc])
+
+  // Cajeros: local SIEMPRE fijo al suyo, aunque el rol cargue después
+  const { role, locationCode: roleLocationCode } = useRole()
+  const esCajero = role === 'cajero' && !!roleLocationCode
+  useEffect(() => {
+    if (esCajero && formLoc !== roleLocationCode) setFormLoc(roleLocationCode)
+  }, [esCajero, roleLocationCode, formLoc])
 
   function updateCount(id, value) {
     setCounts({ ...counts, [id]: value })
@@ -120,20 +129,26 @@ export default function Conteo() {
             <h1 className="text-2xl font-bold text-white">📋 Conteo de Inventario</h1>
             <p className="text-gray-500 text-sm mt-1">Ingresa solo los insumos que contaste. Los demás no se modifican.</p>
           </div>
-          <div className="flex rounded-lg overflow-hidden border border-gray-700">
-            {['SF', 'LA'].map(code => (
-              <button
-                key={code}
-                type="button"
-                onClick={() => setFormLoc(code)}
-                className={`px-3 py-1.5 text-sm font-bold transition ${
-                  formLoc === code ? 'bg-orange-500 text-white' : 'bg-gray-900 text-gray-500 hover:text-gray-300'
-                }`}
-              >
-                {LOCATION_NAMES[code]}
-              </button>
-            ))}
-          </div>
+          {esCajero ? (
+            <span className="bg-orange-500 text-white text-sm font-bold px-3 py-1.5 rounded-lg">
+              {LOCATION_NAMES[formLoc] || formLoc}
+            </span>
+          ) : (
+            <div className="flex rounded-lg overflow-hidden border border-gray-700">
+              {['SF', 'LA'].map(code => (
+                <button
+                  key={code}
+                  type="button"
+                  onClick={() => setFormLoc(code)}
+                  className={`px-3 py-1.5 text-sm font-bold transition ${
+                    formLoc === code ? 'bg-orange-500 text-white' : 'bg-gray-900 text-gray-500 hover:text-gray-300'
+                  }`}
+                >
+                  {LOCATION_NAMES[code]}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {success && (
@@ -148,13 +163,7 @@ export default function Conteo() {
             <div className="flex gap-3">
               <div className="flex-1">
                 <label className="text-gray-400 text-xs mb-1 block">Fecha</label>
-                <input
-                  type="date"
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  required
-                  className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white"
-                />
+                <DateInput value={date} onChange={setDate} required />
               </div>
               <div className="flex-1">
                 <label className="text-gray-400 text-xs mb-1 block">Tipo de conteo</label>
