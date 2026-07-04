@@ -97,7 +97,7 @@ export async function getMermaForMonth(locId, year, month, supabase) {
   const countFinal   = picked.countFinal
 
   // ── 2. Consumo real por insumo: inv inicial + compras − inv final ──────────
-  const [{ data: itemsFinal }, { data: itemsInicial }, { data: comprasItems }, { data: subRecetas }] =
+  const [{ data: itemsFinal }, { data: itemsInicial }, { data: comprasItems }, { data: subRecetas }, { data: transOut }, { data: transIn }] =
     await Promise.all([
       supabase.from('inventory_count_items').select('quantity, insumo_id').eq('count_id', countFinal.id),
       supabase.from('inventory_count_items').select('quantity, insumo_id').eq('count_id', countInicial.id),
@@ -107,6 +107,16 @@ export async function getMermaForMonth(locId, year, month, supabase) {
         .gte('purchases.date', countInicial.date)
         .lte('purchases.date', countFinal.date),
       supabase.from('insumo_recipes').select('insumo_id, ingredient_id, quantity'),
+      supabase.from('transfer_items')
+        .select('insumo_id, quantity, transfers!inner(from_location_id, date)')
+        .eq('transfers.from_location_id', locId)
+        .gte('transfers.date', countInicial.date)
+        .lte('transfers.date', countFinal.date),
+      supabase.from('transfer_items')
+        .select('insumo_id, quantity, transfers!inner(to_location_id, date)')
+        .eq('transfers.to_location_id', locId)
+        .gte('transfers.date', countInicial.date)
+        .lte('transfers.date', countFinal.date),
     ])
 
   // Sub-recetas agrupadas por insumo preparado (ej: Blend → cortes + grasa)
@@ -122,6 +132,10 @@ export async function getMermaForMonth(locId, year, month, supabase) {
   for (const it of (itemsInicial || [])) addExploded(real, it.insumo_id, +parseFloat(it.quantity), subMap)
   for (const it of (comprasItems || [])) addExploded(real, it.insumo_id, +parseFloat(it.quantity), subMap)
   for (const it of (itemsFinal   || [])) addExploded(real, it.insumo_id, -parseFloat(it.quantity), subMap)
+  // Traspasos: lo que entró cuenta como disponible (+), lo que salió no fue
+  // consumo de este local (−)
+  for (const it of (transIn  || [])) addExploded(real, it.insumo_id, +parseFloat(it.quantity), subMap)
+  for (const it of (transOut || [])) addExploded(real, it.insumo_id, -parseFloat(it.quantity), subMap)
 
   // ── 3. Ventas del período: unidades vendidas por producto ──────────────────
   const { data: ventaProductos } = await supabase

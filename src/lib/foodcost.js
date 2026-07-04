@@ -35,6 +35,23 @@ async function _calcularDesdeConteos(countInicial, countFinal, locId, supabase) 
 
   const totalCompras = (comprasData || []).reduce((s, c) => s + parseFloat(c.total), 0)
 
+  // Traspasos entre locales: lo que salió del local no fue consumo suyo (se
+  // resta) y lo que entró sí (se suma), valorizado al costo del traspaso.
+  const [{ data: transOut }, { data: transIn }] = await Promise.all([
+    supabase.from('transfer_items')
+      .select('quantity, unit_cost, transfers!inner(from_location_id, date)')
+      .eq('transfers.from_location_id', locId)
+      .gte('transfers.date', countInicial.date)
+      .lte('transfers.date', countFinal.date),
+    supabase.from('transfer_items')
+      .select('quantity, unit_cost, transfers!inner(to_location_id, date)')
+      .eq('transfers.to_location_id', locId)
+      .gte('transfers.date', countInicial.date)
+      .lte('transfers.date', countFinal.date),
+  ])
+  const traspasosOut = (transOut || []).reduce((s, t) => s + t.quantity * (parseFloat(t.unit_cost) || 0), 0)
+  const traspasosIn  = (transIn  || []).reduce((s, t) => s + t.quantity * (parseFloat(t.unit_cost) || 0), 0)
+
   const { data: ventasData } = await supabase
     .from('sales_periods')
     .select('total_sales')
@@ -48,7 +65,7 @@ async function _calcularDesdeConteos(countInicial, countFinal, locId, supabase) 
     return { ok: false, error: 'Sin ventas registradas en el período entre los dos conteos.' }
   }
 
-  const costoMercaderia = invInicial + totalCompras - invFinal
+  const costoMercaderia = invInicial + totalCompras + traspasosIn - traspasosOut - invFinal
   const value           = (costoMercaderia / ventasNetas) * 100
 
   return {
@@ -56,6 +73,8 @@ async function _calcularDesdeConteos(countInicial, countFinal, locId, supabase) 
     value,
     invInicial,
     compras: totalCompras,
+    traspasosIn,
+    traspasosOut,
     invFinal,
     ventasNetas,
     costoMercaderia,

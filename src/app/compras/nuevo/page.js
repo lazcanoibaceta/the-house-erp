@@ -7,8 +7,16 @@ import Link from 'next/link'
 
 const supabase = createClient()
 
+const LOCATION_NAMES = { SF: 'San Felipe', LA: 'Los Andes' }
+
 export default function NuevaCompra() {
-  const { locationCode, locationId, loading: locationLoading } = useLocation()
+  const { locationCode, loading: locationLoading } = useLocation()
+
+  // Local EXPLÍCITO del formulario: parte con el local activo pero queda
+  // fijado acá, visible y editable — evita que un cambio de toggle en otra
+  // pestaña guarde la compra en el local equivocado (bug compras SF/LA)
+  const [locations, setLocations]   = useState([])
+  const [formLoc, setFormLoc]       = useState('')
 
   const [suppliers, setSuppliers]   = useState([])
   const [insumos, setInsumos]       = useState([])
@@ -18,6 +26,8 @@ export default function NuevaCompra() {
   const [loading, setLoading]       = useState(false)
   const [success, setSuccess]       = useState(false)
 
+  const formLocId = locations.find(l => l.short_code === formLoc)?.id || null
+
   const [showAddSupplier, setShowAddSupplier]   = useState(false)
   const [newSupplierName, setNewSupplierName]   = useState('')
   const [newSupplierPhone, setNewSupplierPhone] = useState('')
@@ -25,18 +35,25 @@ export default function NuevaCompra() {
 
   useEffect(() => {
     supabase.from('insumos').select('*').order('name').then(({ data }) => setInsumos(data || []))
+    supabase.from('locations').select('id, short_code').then(({ data }) => setLocations(data || []))
   }, [])
 
+  // Inicializa el local del formulario con el local activo (solo una vez)
   useEffect(() => {
-    if (!locationId) return
+    if (!locationLoading && !formLoc && locationCode) setFormLoc(locationCode)
+  }, [locationLoading, locationCode, formLoc])
+
+  useEffect(() => {
+    if (!formLocId) return
     fetchSuppliers()
-  }, [locationId])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formLocId])
 
   async function fetchSuppliers() {
     const { data } = await supabase
       .from('supplier_locations')
       .select('supplier_id, suppliers(id, name)')
-      .eq('location_id', locationId)
+      .eq('location_id', formLocId)
     const list = (data || []).map(row => row.suppliers).filter(Boolean)
     list.sort((a, b) => a.name.localeCompare(b.name))
     setSuppliers(list)
@@ -45,14 +62,14 @@ export default function NuevaCompra() {
 
   async function handleAddSupplier(e) {
     e.preventDefault()
-    if (!newSupplierName.trim() || !locationId) return
+    if (!newSupplierName.trim() || !formLocId) return
     setSavingSupplier(true)
     const { data: supplier, error } = await supabase
       .from('suppliers')
       .insert({ name: newSupplierName.trim(), phone: newSupplierPhone.trim() || null })
       .select().single()
     if (error) { console.error(error); setSavingSupplier(false); return }
-    await supabase.from('supplier_locations').insert({ supplier_id: supplier.id, location_id: locationId })
+    await supabase.from('supplier_locations').insert({ supplier_id: supplier.id, location_id: formLocId })
     await fetchSuppliers()
     setSupplierId(supplier.id)
     setShowAddSupplier(false)
@@ -68,11 +85,12 @@ export default function NuevaCompra() {
 
   async function handleSubmit(e) {
     e.preventDefault()
+    if (!formLocId) return
     setLoading(true)
     const total = getTotal()
     const { data: purchase, error } = await supabase
       .from('purchases')
-      .insert({ supplier_id: supplierId, date, total, location_id: locationId })
+      .insert({ supplier_id: supplierId, date, total, location_id: formLocId })
       .select().single()
     if (error) { console.error(error); setLoading(false); return }
 
@@ -82,16 +100,16 @@ export default function NuevaCompra() {
       const total = parseFloat(item.total_price)
       const price = total / qty
       await supabase.from('purchase_items').insert({ purchase_id: purchase.id, insumo_id: item.insumo_id, quantity: qty, unit_price: price })
-      const { data: costRow } = await supabase.from('insumo_costs').select('stock, avg_cost').eq('insumo_id', item.insumo_id).eq('location_id', locationId).single()
+      const { data: costRow } = await supabase.from('insumo_costs').select('stock, avg_cost').eq('insumo_id', item.insumo_id).eq('location_id', formLocId).single()
       const currentStock = parseFloat(costRow?.stock) || 0
       const currentCost  = parseFloat(costRow?.avg_cost) || 0
       const newStock     = currentStock + qty
       const newAvgCost   = newStock > 0 ? ((currentStock * currentCost) + (qty * price)) / newStock : price
       await supabase.from('insumo_costs').upsert(
-        { insumo_id: item.insumo_id, location_id: locationId, stock: newStock, avg_cost: newAvgCost },
+        { insumo_id: item.insumo_id, location_id: formLocId, stock: newStock, avg_cost: newAvgCost },
         { onConflict: 'insumo_id,location_id' }
       )
-      await supabase.from('stock_movements').insert({ insumo_id: item.insumo_id, type: 'entrada', quantity: qty, reason: 'Compra a proveedor', location_id: locationId })
+      await supabase.from('stock_movements').insert({ insumo_id: item.insumo_id, type: 'entrada', quantity: qty, reason: 'Compra a proveedor', location_id: formLocId })
     }
 
     setSuccess(true)
@@ -111,9 +129,20 @@ export default function NuevaCompra() {
           </Link>
           <div className="flex items-center justify-between">
             <h1 className="text-2xl font-bold text-white">🛒 Registrar Compra</h1>
-            <span className="bg-orange-500 text-white text-sm font-bold px-3 py-1 rounded-lg">
-              {locationCode}
-            </span>
+            <div className="flex rounded-lg overflow-hidden border border-gray-700">
+              {['SF', 'LA'].map(code => (
+                <button
+                  key={code}
+                  type="button"
+                  onClick={() => { setFormLoc(code); setSupplierId('') }}
+                  className={`px-3 py-1.5 text-sm font-bold transition ${
+                    formLoc === code ? 'bg-orange-500 text-white' : 'bg-gray-900 text-gray-500 hover:text-gray-300'
+                  }`}
+                >
+                  {LOCATION_NAMES[code]}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -129,7 +158,7 @@ export default function NuevaCompra() {
               value={supplierId}
               onChange={e => setSupplierId(e.target.value)}
               required
-              disabled={locationLoading}
+              disabled={!formLocId}
               className="bg-gray-800 border border-gray-700 rounded-lg p-2 text-white"
             >
               <option value="">Seleccionar proveedor...</option>
@@ -178,8 +207,8 @@ export default function NuevaCompra() {
             <span className="text-xl font-bold text-white">${getTotal().toLocaleString('es-CL')}</span>
           </div>
 
-          <button type="submit" disabled={loading || locationLoading} className="bg-orange-500 hover:bg-orange-600 text-white rounded-xl p-3 font-semibold transition disabled:opacity-50">
-            {loading ? 'Guardando...' : 'Registrar compra'}
+          <button type="submit" disabled={loading || !formLocId} className="bg-orange-500 hover:bg-orange-600 text-white rounded-xl p-3 font-semibold transition disabled:opacity-50">
+            {loading ? 'Guardando...' : `Registrar compra en ${LOCATION_NAMES[formLoc] || '...'}`}
           </button>
         </form>
 
@@ -202,7 +231,7 @@ export default function NuevaCompra() {
                 <label className="text-gray-400 text-xs mb-1 block">Teléfono (opcional)</label>
                 <input type="text" value={newSupplierPhone} onChange={e => setNewSupplierPhone(e.target.value)} placeholder="+56 9 ..." className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white text-sm" />
               </div>
-              <p className="text-gray-600 text-xs">Se agregará a {locationCode} y quedará disponible de inmediato.</p>
+              <p className="text-gray-600 text-xs">Se agregará a {LOCATION_NAMES[formLoc] || formLoc} y quedará disponible de inmediato.</p>
               <button type="submit" disabled={savingSupplier || !newSupplierName.trim()} className="bg-orange-500 hover:bg-orange-600 text-white rounded-lg p-2.5 font-semibold text-sm transition disabled:opacity-50">
                 {savingSupplier ? 'Guardando...' : 'Agregar proveedor'}
               </button>

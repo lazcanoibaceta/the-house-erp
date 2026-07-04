@@ -13,8 +13,14 @@ export function useLocation() {
       setLocationCode(saved)
     }
     readLocation()
+    // 'locationChanged' = cambio en esta pestaña; 'storage' = cambio en OTRA
+    // pestaña del mismo navegador (antes quedaban desincronizadas)
     window.addEventListener('locationChanged', readLocation)
-    return () => window.removeEventListener('locationChanged', readLocation)
+    window.addEventListener('storage', readLocation)
+    return () => {
+      window.removeEventListener('locationChanged', readLocation)
+      window.removeEventListener('storage', readLocation)
+    }
   }, [])
 
   useEffect(() => {
