@@ -15,6 +15,8 @@
  * Espejo de foodcost.js: usa los dos conteos `cierre_mes` que enmarcan el mes.
  */
 
+import { pickCountsForMonth } from './foodcost'
+
 // Normaliza nombres para cruzar ventas (nombre Justo) con products.name
 function normalize(s) {
   return (s || '')
@@ -85,8 +87,14 @@ export async function getMermaForMonth(locId, year, month, supabase) {
   if (!counts || counts.length < 2) {
     return { ok: false, error: 'Necesitas 2 conteos de cierre de mes que enmarquen este período.' }
   }
-  const countInicial = counts[0]
-  const countFinal   = counts[counts.length - 1]
+  // Igual que foodcost: los conteos más cercanos a los bordes del mes,
+  // no el primero/último de la ventana (evita arrastrar meses o días extra)
+  const picked = pickCountsForMonth(counts, year, month)
+  if (!picked) {
+    return { ok: false, error: 'No hay dos conteos distintos que enmarquen este mes.' }
+  }
+  const countInicial = picked.countInicial
+  const countFinal   = picked.countFinal
 
   // ── 2. Consumo real por insumo: inv inicial + compras − inv final ──────────
   const [{ data: itemsFinal }, { data: itemsInicial }, { data: comprasItems }, { data: subRecetas }] =
@@ -165,7 +173,12 @@ export async function getMermaForMonth(locId, year, month, supabase) {
   const productosSinReceta = [] // { name, units } no calzaron o no tienen receta
 
   for (const [nombreNorm, unidades] of Object.entries(unidadesPorProducto)) {
-    const productId = nombreAProductId[nombreNorm]
+    // Justo agrega "Burger" al nombre ("Cheese Burger") pero en products se
+    // llama sin esa palabra ("Cheese") → segundo intento sin el sufijo
+    let productId = nombreAProductId[nombreNorm]
+    if (!productId && nombreNorm.endsWith(' burger')) {
+      productId = nombreAProductId[nombreNorm.replace(/ burger$/, '')]
+    }
     const receta = productId ? recetasPorProducto[productId] : null
     if (!receta || receta.length === 0) {
       productosSinReceta.push({ name: nombreNorm, units: unidades })

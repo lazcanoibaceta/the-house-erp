@@ -93,13 +93,39 @@ export async function getFoodCost(locId, supabase) {
 }
 
 /**
+ * pickCountsForMonth(counts, year, month)
+ *
+ * Elige los dos conteos que mejor enmarcan un mes calendario:
+ *  - inicial: el más cercano al último día del mes ANTERIOR
+ *  - final:   el más cercano al último día del mes
+ *
+ * Antes se tomaba el primero y el último de la ventana ±1 mes, lo que
+ * arrastraba un mes completo extra (si había un conteo el 01 del mes anterior)
+ * o días del mes siguiente (si había un conteo posterior al cierre).
+ *
+ * Retorna { countInicial, countFinal } o null si no hay dos conteos válidos.
+ */
+export function pickCountsForMonth(counts, year, month) {
+  if (!counts || counts.length < 2) return null
+  const finMesAnterior = new Date(year, month - 1, 0) // ej: 31-may para junio
+  const finMes         = new Date(year, month, 0)     // ej: 30-jun para junio
+  const dist = (c, target) => Math.abs(new Date(c.date + 'T00:00:00') - target)
+  const closest = (target) =>
+    counts.reduce((best, c) => (dist(c, target) < dist(best, target) ? c : best))
+  const countInicial = closest(finMesAnterior)
+  const countFinal   = closest(finMes)
+  if (countInicial.id === countFinal.id || countInicial.date >= countFinal.date) return null
+  return { countInicial, countFinal }
+}
+
+/**
  * getFoodCostForMonth(locId, year, month, supabase)
  *
  * Calcula el Food Cost para un mes calendario específico buscando los conteos
  * de cierre de mes que delimitan ese mes (uno antes/en el mes, otro al final/después).
  *
- * Busca en una ventana de ±1 mes, toma el más antiguo como inicial
- * y el más reciente como final.
+ * Busca en una ventana de ±1 mes y elige con pickCountsForMonth los conteos
+ * más cercanos a los bordes del mes.
  *
  * Retorna igual que getFoodCost.
  */
@@ -129,8 +155,10 @@ export async function getFoodCostForMonth(locId, year, month, supabase) {
     return { ok: false, error: 'No hay conteos de cierre de mes para este período.' }
   }
 
-  const countInicial = counts[0]
-  const countFinal   = counts[counts.length - 1]
+  const picked = pickCountsForMonth(counts, year, month)
+  if (!picked) {
+    return { ok: false, error: 'No hay dos conteos distintos que enmarquen este mes.' }
+  }
 
-  return _calcularDesdeConteos(countInicial, countFinal, locId, supabase)
+  return _calcularDesdeConteos(picked.countInicial, picked.countFinal, locId, supabase)
 }
