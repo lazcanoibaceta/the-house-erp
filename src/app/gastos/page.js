@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase'
 import { useLocation } from '@/hooks/useLocation'
+import DateInput from '@/components/DateInput'
 import Link from 'next/link'
 
 const supabase = createClient()
@@ -23,6 +24,15 @@ export default function Gastos() {
   const [gastos, setGastos] = useState([])
   const [categorias, setCategorias] = useState([])
   const [loading, setLoading] = useState(true)
+  const [expandido, setExpandido] = useState(null)
+
+  // Edición
+  const [editando, setEditando] = useState(null)
+  const [editForm, setEditForm] = useState(null)
+  const [savingEdit, setSavingEdit] = useState(false)
+
+  // Eliminación
+  const [eliminando, setEliminando] = useState(null)
 
   useEffect(() => {
     supabase.from('expense_categories').select('*').order('name').then(({ data }) => {
@@ -70,6 +80,75 @@ export default function Gastos() {
     if (m < 1) { m = 12; a-- }
     setMes(m)
     setAnio(a)
+  }
+
+  // ── Edición ─────────────────────────────────────────────────────────────────
+  // amount_net siempre guarda el valor que tecleó el usuario (para factura es el
+  // neto; para boleta/otro es el total). Por eso el campo editable parte de ahí.
+  function abrirEdicion(g) {
+    setEditando(g)
+    setEditForm({
+      category_id:     g.category_id || '',
+      supplier:        g.supplier || '',
+      description:     g.description || '',
+      document_type:   g.document_type || 'factura',
+      document_number: g.document_number || '',
+      amount:          String(g.amount_net ?? ''),
+      payment_method:  g.payment_method || 'transferencia',
+      expense_date:    g.expense_date,
+      notes:           g.notes || '',
+    })
+  }
+
+  function updateEditForm(field, value) {
+    setEditForm(prev => ({ ...prev, [field]: value }))
+  }
+
+  // Misma lógica IVA que el formulario de nuevo gasto
+  function calcularMontosEdit() {
+    const val = parseFloat(editForm?.amount) || 0
+    if (editForm?.document_type === 'factura') {
+      return { amount_net: val, amount_total: Math.round(val * 1.19), has_iva: true }
+    }
+    return { amount_net: val, amount_total: val, has_iva: false }
+  }
+
+  async function handleSaveEdit(e) {
+    e.preventDefault()
+    setSavingEdit(true)
+    const montos = calcularMontosEdit()
+    await supabase.from('operating_expenses').update({
+      category_id:     editForm.category_id || null,
+      supplier:        editForm.supplier || null,
+      description:     editForm.description || null,
+      amount_net:      montos.amount_net,
+      amount_total:    montos.amount_total,
+      has_iva:         montos.has_iva,
+      document_type:   editForm.document_type,
+      document_number: editForm.document_number || null,
+      expense_date:    editForm.expense_date,
+      payment_method:  editForm.payment_method,
+      notes:           editForm.notes || null,
+    }).eq('id', editando.id)
+    setSavingEdit(false)
+    setEditando(null)
+    setEditForm(null)
+    await fetchGastos()
+  }
+
+  // ── Eliminación ─────────────────────────────────────────────────────────────
+  async function handleEliminar(g) {
+    const fecha = new Date(g.expense_date + 'T12:00:00').toLocaleDateString('es-CL', { day: 'numeric', month: 'short' })
+    const nombre = g.expense_categories?.name || g.supplier || 'gasto'
+    const ok = window.confirm(
+      `¿Eliminar este gasto?\n\n${nombre} · ${fecha}\n$${parseFloat(g.amount_net).toLocaleString('es-CL')}\n\nEsta acción no se puede deshacer.`
+    )
+    if (!ok) return
+    setEliminando(g.id)
+    await supabase.from('operating_expenses').delete().eq('id', g.id)
+    setEliminando(null)
+    setExpandido(null)
+    await fetchGastos()
   }
 
   const totalMes = gastos.reduce((sum, g) => sum + parseFloat(g.amount_net), 0)
@@ -186,47 +265,172 @@ export default function Gastos() {
         ) : (
           <div className="flex flex-col gap-2">
             {gastos.map(g => (
-              <div key={g.id} className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
-                <div className="flex items-start justify-between">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-white font-medium text-sm">
-                        {g.expense_categories?.name || 'Sin categoría'}
-                      </span>
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${
-                        g.document_type === 'factura'
-                          ? 'bg-blue-900/50 text-blue-400'
-                          : g.document_type === 'boleta'
-                          ? 'bg-gray-800 text-gray-400'
-                          : 'bg-gray-800 text-gray-500'
-                      }`}>
-                        {g.document_type || 'sin doc'}
-                      </span>
+              <div key={g.id} className="bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden">
+                <button
+                  className="w-full p-4 text-left hover:bg-gray-800/50 transition"
+                  onClick={() => setExpandido(expandido === g.id ? null : g.id)}
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-white font-medium text-sm">
+                          {g.expense_categories?.name || 'Sin categoría'}
+                        </span>
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${
+                          g.document_type === 'factura'
+                            ? 'bg-blue-900/50 text-blue-400'
+                            : g.document_type === 'boleta'
+                            ? 'bg-gray-800 text-gray-400'
+                            : 'bg-gray-800 text-gray-500'
+                        }`}>
+                          {g.document_type || 'sin doc'}
+                        </span>
+                      </div>
+                      {g.supplier && (
+                        <p className="text-gray-500 text-xs mt-0.5">{g.supplier}</p>
+                      )}
+                      {g.description && (
+                        <p className="text-gray-600 text-xs mt-0.5 truncate">{g.description}</p>
+                      )}
                     </div>
-                    {g.supplier && (
-                      <p className="text-gray-500 text-xs mt-0.5">{g.supplier}</p>
-                    )}
-                    {g.description && (
-                      <p className="text-gray-600 text-xs mt-0.5 truncate">{g.description}</p>
-                    )}
+                    <div className="text-right ml-3 shrink-0 flex items-start gap-2">
+                      <div>
+                        <p className="text-white font-bold">
+                          ${parseFloat(g.amount_net).toLocaleString('es-CL', { maximumFractionDigits: 0 })}
+                        </p>
+                        <p className="text-gray-600 text-xs">
+                          {new Date(g.expense_date + 'T12:00:00').toLocaleDateString('es-CL', {
+                            day: 'numeric', month: 'short'
+                          })}
+                        </p>
+                      </div>
+                      <span className="text-gray-500 text-xs mt-1">{expandido === g.id ? '▲' : '▼'}</span>
+                    </div>
                   </div>
-                  <div className="text-right ml-3 shrink-0">
-                    <p className="text-white font-bold">
-                      ${parseFloat(g.amount_net).toLocaleString('es-CL', { maximumFractionDigits: 0 })}
-                    </p>
-                    <p className="text-gray-600 text-xs">
-                      {new Date(g.expense_date + 'T12:00:00').toLocaleDateString('es-CL', {
-                        day: 'numeric', month: 'short'
-                      })}
-                    </p>
+                </button>
+
+                {expandido === g.id && (
+                  <div className="border-t border-gray-800 p-4 flex flex-col gap-3">
+                    {(g.document_number || g.payment_method || g.notes) && (
+                      <div className="flex flex-col gap-1 text-xs text-gray-500">
+                        {g.document_number && <p>N° documento: <span className="text-gray-400">{g.document_number}</span></p>}
+                        {g.payment_method && <p>Forma de pago: <span className="text-gray-400">{g.payment_method}</span></p>}
+                        {g.notes && <p>Notas: <span className="text-gray-400">{g.notes}</span></p>}
+                      </div>
+                    )}
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => abrirEdicion(g)}
+                        className="flex-1 text-center text-sm text-orange-400 border border-orange-500/30 rounded-lg py-2 hover:bg-orange-500/10 transition"
+                      >
+                        ✏️ Editar
+                      </button>
+                      <button
+                        onClick={() => handleEliminar(g)}
+                        disabled={eliminando === g.id}
+                        className="flex-1 text-center text-sm text-red-400 border border-red-500/30 rounded-lg py-2 hover:bg-red-500/10 transition disabled:opacity-50"
+                      >
+                        {eliminando === g.id ? 'Eliminando...' : '🗑️ Eliminar'}
+                      </button>
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             ))}
           </div>
         )}
 
       </div>
+
+      {/* Modal edición */}
+      {editando && editForm && (
+        <div className="fixed inset-0 bg-black/70 flex items-end md:items-center justify-center z-50 p-4">
+          <div className="bg-gray-900 rounded-2xl w-full max-w-lg max-h-[90vh] flex flex-col border border-gray-800">
+            <div className="p-4 border-b border-gray-800 flex justify-between items-center">
+              <h2 className="text-white font-bold">✏️ Editar gasto</h2>
+              <button onClick={() => { setEditando(null); setEditForm(null) }} className="text-gray-400 hover:text-white text-xl">✕</button>
+            </div>
+            <form onSubmit={handleSaveEdit} className="overflow-y-auto flex-1 p-4 flex flex-col gap-4">
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <label className="text-gray-400 text-xs mb-1 block">Fecha</label>
+                  <DateInput value={editForm.expense_date} onChange={v => updateEditForm('expense_date', v)} required />
+                </div>
+                <div className="flex-1">
+                  <label className="text-gray-400 text-xs mb-1 block">Tipo documento</label>
+                  <select value={editForm.document_type} onChange={e => updateEditForm('document_type', e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white text-sm">
+                    <option value="factura">Factura</option>
+                    <option value="boleta">Boleta</option>
+                    <option value="otro">Otro</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <label className="text-gray-400 text-xs mb-1 block">N° documento</label>
+                  <input type="text" value={editForm.document_number} onChange={e => updateEditForm('document_number', e.target.value)} placeholder="Opcional" className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white text-sm" />
+                </div>
+                <div className="flex-1">
+                  <label className="text-gray-400 text-xs mb-1 block">Forma de pago</label>
+                  <select value={editForm.payment_method} onChange={e => updateEditForm('payment_method', e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white text-sm">
+                    <option value="transferencia">Transferencia</option>
+                    <option value="efectivo">Efectivo</option>
+                    <option value="tarjeta">Tarjeta</option>
+                    <option value="cheque">Cheque</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-gray-400 text-xs mb-1 block">Categoría</label>
+                <select value={editForm.category_id} onChange={e => updateEditForm('category_id', e.target.value)} required className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white text-sm">
+                  <option value="">Seleccionar categoría...</option>
+                  {categorias.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-gray-400 text-xs mb-1 block">Proveedor / Empresa</label>
+                <input type="text" value={editForm.supplier} onChange={e => updateEditForm('supplier', e.target.value)} placeholder="Ej: Aguas del Valle, CGE..." className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white text-sm" />
+              </div>
+
+              <div>
+                <label className="text-gray-400 text-xs mb-1 block">Descripción</label>
+                <input type="text" value={editForm.description} onChange={e => updateEditForm('description', e.target.value)} placeholder="Ej: Cuenta de agua abril..." className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white text-sm" />
+              </div>
+
+              <div>
+                <label className="text-gray-400 text-xs mb-1 block">
+                  {editForm.document_type === 'factura' ? 'Monto neto (sin IVA)' : editForm.document_type === 'boleta' ? 'Monto total (según boleta)' : 'Monto'}
+                </label>
+                <input type="number" value={editForm.amount} onChange={e => updateEditForm('amount', e.target.value)} placeholder="$" required className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white text-sm" />
+                {editForm.amount && parseFloat(editForm.amount) > 0 && editForm.document_type === 'factura' && (
+                  <div className="bg-gray-800/50 rounded-lg p-3 mt-2 flex justify-between text-xs text-gray-400">
+                    <span>Neto: <span className="text-white font-medium">${calcularMontosEdit().amount_net.toLocaleString('es-CL')}</span></span>
+                    <span>IVA (19%): <span className="text-white font-medium">${(calcularMontosEdit().amount_total - calcularMontosEdit().amount_net).toLocaleString('es-CL')}</span></span>
+                    <span>Total: <span className="text-white font-medium">${calcularMontosEdit().amount_total.toLocaleString('es-CL')}</span></span>
+                  </div>
+                )}
+                {editForm.amount && parseFloat(editForm.amount) > 0 && editForm.document_type === 'boleta' && (
+                  <div className="bg-gray-800/50 rounded-lg p-3 mt-2 text-xs text-gray-400">
+                    Boleta: sin crédito fiscal → se registra el total <span className="text-white font-medium">${calcularMontosEdit().amount_total.toLocaleString('es-CL')}</span> como costo (no se extrae IVA).
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="text-gray-400 text-xs mb-1 block">Notas internas (opcional)</label>
+                <textarea value={editForm.notes} onChange={e => updateEditForm('notes', e.target.value)} rows={2} className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white text-sm resize-none" />
+              </div>
+
+              <button type="submit" disabled={savingEdit} className="bg-orange-500 hover:bg-orange-600 text-white rounded-xl p-3 font-semibold transition disabled:opacity-50">
+                {savingEdit ? 'Guardando...' : 'Guardar cambios'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
     </main>
   )
 }
