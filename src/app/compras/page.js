@@ -32,6 +32,9 @@ export default function Compras() {
   const [editItems, setEditItems]         = useState([])
   const [savingEdit, setSavingEdit]       = useState(false)
 
+  // Eliminación
+  const [eliminando, setEliminando]       = useState(null)
+
   useEffect(() => {
     if (!locationId) return
     fetchSuppliers()
@@ -127,6 +130,47 @@ export default function Compras() {
     }
     setSavingEdit(false)
     setEditando(null)
+    await fetchCompras()
+  }
+
+  // ── Eliminación ─────────────────────────────────────────────────────────────
+  async function handleEliminar(compra) {
+    const fecha = new Date(compra.date + 'T12:00:00').toLocaleDateString('es-CL', { day: 'numeric', month: 'short' })
+    const ok = window.confirm(
+      `¿Eliminar esta compra?\n\n${compra.suppliers?.name} · ${fecha}\n$${parseFloat(compra.total).toLocaleString('es-CL')}\n\n` +
+      `Se descontará del stock lo que esta compra había sumado. Esta acción no se puede deshacer.`
+    )
+    if (!ok) return
+    setEliminando(compra.id)
+
+    // 1. Revertir el stock que sumó cada ítem (el costo promedio no se recalcula)
+    for (const item of compra.purchase_items || []) {
+      const qty = parseFloat(item.quantity) || 0
+      if (!qty) continue
+      const { data: costRow } = await supabase
+        .from('insumo_costs')
+        .select('stock')
+        .eq('insumo_id', item.insumo_id)
+        .eq('location_id', locationId)
+        .single()
+      const newStock = (parseFloat(costRow?.stock) || 0) - qty
+      await supabase
+        .from('insumo_costs')
+        .update({ stock: newStock })
+        .eq('insumo_id', item.insumo_id)
+        .eq('location_id', locationId)
+      await supabase.from('stock_movements').insert({
+        insumo_id: item.insumo_id, type: 'salida', quantity: qty,
+        reason: 'Compra eliminada (corrección)', location_id: locationId,
+      })
+    }
+
+    // 2. Borrar los ítems y la compra
+    await supabase.from('purchase_items').delete().eq('purchase_id', compra.id)
+    await supabase.from('purchases').delete().eq('id', compra.id)
+
+    setEliminando(null)
+    setExpandido(null)
     await fetchCompras()
   }
 
@@ -233,12 +277,19 @@ export default function Compras() {
                         </div>
                       ))}
                     </div>
-                    <div className="px-4 pb-4">
+                    <div className="px-4 pb-4 flex gap-2">
                       <button
                         onClick={() => abrirEdicion(compra)}
-                        className="w-full text-center text-sm text-orange-400 border border-orange-500/30 rounded-lg py-2 hover:bg-orange-500/10 transition"
+                        className="flex-1 text-center text-sm text-orange-400 border border-orange-500/30 rounded-lg py-2 hover:bg-orange-500/10 transition"
                       >
-                        ✏️ Editar compra
+                        ✏️ Editar
+                      </button>
+                      <button
+                        onClick={() => handleEliminar(compra)}
+                        disabled={eliminando === compra.id}
+                        className="flex-1 text-center text-sm text-red-400 border border-red-500/30 rounded-lg py-2 hover:bg-red-500/10 transition disabled:opacity-50"
+                      >
+                        {eliminando === compra.id ? 'Eliminando...' : '🗑️ Eliminar'}
                       </button>
                     </div>
                   </div>
