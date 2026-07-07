@@ -97,12 +97,13 @@ export default function Compras() {
     setEditDate(compra.date)
     setEditItems(
       compra.purchase_items.map(it => ({
-        id:          it.id,
-        insumo_id:   it.insumo_id,
-        insumo_name: it.insumos?.name,
-        unit:        it.insumos?.unit,
-        quantity:    it.quantity,
-        total_price: (it.quantity * it.unit_price).toFixed(0),
+        id:                it.id,
+        insumo_id:         it.insumo_id,
+        insumo_name:       it.insumos?.name,
+        unit:              it.insumos?.unit,
+        quantity:          it.quantity,
+        original_quantity: parseFloat(it.quantity) || 0,
+        total_price:       (it.quantity * it.unit_price).toFixed(0),
       }))
     )
   }
@@ -127,6 +128,30 @@ export default function Compras() {
       const totalPrice = parseFloat(item.total_price)
       if (!qty || !totalPrice) continue
       await supabase.from('purchase_items').update({ quantity: qty, unit_price: totalPrice / qty }).eq('id', item.id)
+
+      // Ajustar el stock por la diferencia de cantidad (el costo promedio NO se recalcula)
+      const delta = qty - (parseFloat(item.original_quantity) || 0)
+      if (delta !== 0) {
+        const { data: costRow } = await supabase
+          .from('insumo_costs')
+          .select('stock')
+          .eq('insumo_id', item.insumo_id)
+          .eq('location_id', locationId)
+          .single()
+        const newStock = (parseFloat(costRow?.stock) || 0) + delta
+        await supabase
+          .from('insumo_costs')
+          .update({ stock: newStock })
+          .eq('insumo_id', item.insumo_id)
+          .eq('location_id', locationId)
+        await supabase.from('stock_movements').insert({
+          insumo_id: item.insumo_id,
+          type: delta > 0 ? 'entrada' : 'salida',
+          quantity: Math.abs(delta),
+          reason: 'Ajuste por edición de compra',
+          location_id: locationId,
+        })
+      }
     }
     setSavingEdit(false)
     setEditando(null)
@@ -344,7 +369,7 @@ export default function Compras() {
                 <span className="text-white font-bold">${getEditTotal().toLocaleString('es-CL')}</span>
               </div>
               <p className="text-gray-600 text-xs">
-                * Editar no recalcula el stock ni el costo promedio. Solo corrige el registro histórico.
+                * Editar ajusta el stock por la diferencia de cantidad, pero no recalcula el costo promedio.
               </p>
               <button type="submit" disabled={savingEdit} className="bg-orange-500 hover:bg-orange-600 text-white rounded-xl p-3 font-semibold transition disabled:opacity-50">
                 {savingEdit ? 'Guardando...' : 'Guardar cambios'}
