@@ -6,10 +6,17 @@ import { useLocation } from '@/hooks/useLocation'
 
 const supabase = createClient()
 
+const LOCATION_NAMES = { SF: 'San Felipe', LA: 'Los Andes' }
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
 
 export default function Labor() {
-  const { locationCode, locationId, loading: locationLoading } = useLocation()
+  const { locationCode, loading: locationLoading } = useLocation()
+
+  // Local EXPLÍCITO de la página (evita guardar en el local ambiente
+  // equivocado). Form + historial se scopean a este local.
+  const [locations, setLocations] = useState([])
+  const [formLoc, setFormLoc] = useState('')
+  const formLocId = locations.find(l => l.short_code === formLoc)?.id || null
 
   const now = new Date()
   const [formMes, setFormMes] = useState(now.getMonth() + 1)
@@ -24,16 +31,26 @@ export default function Labor() {
   const [editandoId, setEditandoId] = useState(null)
 
   useEffect(() => {
-    if (!locationId) return
+    supabase.from('locations').select('id, short_code').then(({ data }) => setLocations(data || []))
+  }, [])
+
+  // Inicializa el local de la página con el local activo (solo una vez)
+  useEffect(() => {
+    if (!locationLoading && !formLoc && locationCode) setFormLoc(locationCode)
+  }, [locationLoading, locationCode, formLoc])
+
+  useEffect(() => {
+    if (!formLocId) return
     fetchRegistros()
-  }, [locationId])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formLocId])
 
   async function fetchRegistros() {
     setLoading(true)
     const { data } = await supabase
       .from('labor_costs')
       .select('*')
-      .eq('location_id', locationId)
+      .eq('location_id', formLocId)
       .order('period_year', { ascending: false })
       .order('period_month', { ascending: false })
     setRegistros(data || [])
@@ -42,7 +59,7 @@ export default function Labor() {
 
   async function handleSubmit(e) {
     e.preventDefault()
-    if (!locationId || !formAmount) return
+    if (!formLocId || !formAmount) return
     setSaving(true)
 
     // Upsert: si ya existe el mes, sobreescribe
@@ -50,7 +67,7 @@ export default function Labor() {
       .from('labor_costs')
       .upsert({
         ...(editandoId ? { id: editandoId } : {}),
-        location_id: locationId,
+        location_id: formLocId,
         period_year: formAnio,
         period_month: formMes,
         amount: parseFloat(formAmount),
@@ -94,11 +111,22 @@ export default function Labor() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-white">👥 Costo Laboral</h1>
-            <p className="text-gray-500 text-sm mt-1">Remuneraciones de {locationCode}</p>
+            <p className="text-gray-500 text-sm mt-1">Remuneraciones de {LOCATION_NAMES[formLoc] || '...'}</p>
           </div>
-          <span className="bg-orange-500 text-white text-sm font-bold px-3 py-1 rounded-lg">
-            {locationCode}
-          </span>
+          <div className="flex rounded-lg overflow-hidden border border-gray-700">
+            {['SF', 'LA'].map(code => (
+              <button
+                key={code}
+                type="button"
+                onClick={() => setFormLoc(code)}
+                className={`px-3 py-1.5 text-sm font-bold transition ${
+                  formLoc === code ? 'bg-orange-500 text-white' : 'bg-gray-900 text-gray-500 hover:text-gray-300'
+                }`}
+              >
+                {LOCATION_NAMES[code]}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Formulario */}
@@ -183,7 +211,7 @@ export default function Labor() {
             <div className="flex gap-2">
               <button
                 type="submit"
-                disabled={saving || locationLoading}
+                disabled={saving || locationLoading || !formLocId}
                 className="flex-1 bg-orange-500 hover:bg-orange-600 text-white rounded-xl p-3 font-semibold text-sm transition disabled:opacity-50"
               >
                 {saving ? 'Guardando...' : editandoId ? 'Guardar cambios' : 'Guardar'}
@@ -208,7 +236,7 @@ export default function Labor() {
           {loading || locationLoading ? (
             <p className="text-gray-500 text-sm">Cargando...</p>
           ) : registros.length === 0 ? (
-            <p className="text-gray-600 text-sm">No hay registros para {locationCode} todavía.</p>
+            <p className="text-gray-600 text-sm">No hay registros para {LOCATION_NAMES[formLoc] || ''} todavía.</p>
           ) : (
             <div className="flex flex-col gap-3">
               {registros.map(r => (
