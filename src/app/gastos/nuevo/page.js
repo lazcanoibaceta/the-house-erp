@@ -3,15 +3,25 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase'
 import { useLocation } from '@/hooks/useLocation'
+import { useRole } from '@/hooks/useRole'
 import DateInput from '@/components/DateInput'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 
 const supabase = createClient()
 
+const LOCATION_NAMES = { SF: 'San Felipe', LA: 'Los Andes' }
+
 export default function NuevoGasto() {
-  const { locationCode, locationId, loading: locationLoading } = useLocation()
+  const { locationCode, loading: locationLoading } = useLocation()
   const router = useRouter()
+
+  // Local EXPLÍCITO del formulario: parte con el local activo pero queda fijado
+  // acá, visible y editable — evita que el localStorage ambiente (que defaultea
+  // a SF) guarde el gasto en el local equivocado (mismo bug que hubo en compras).
+  const [locations, setLocations] = useState([])
+  const [formLoc, setFormLoc]     = useState('')
+  const formLocId = locations.find(l => l.short_code === formLoc)?.id || null
 
   const [categorias, setCategorias] = useState([])
   const [loading, setLoading] = useState(false)
@@ -33,7 +43,21 @@ export default function NuevoGasto() {
     supabase.from('expense_categories').select('*').order('name').then(({ data }) => {
       setCategorias(data || [])
     })
+    supabase.from('locations').select('id, short_code').then(({ data }) => setLocations(data || []))
   }, [])
+
+  // Inicializa el local del formulario con el local activo (solo una vez)
+  useEffect(() => {
+    if (!locationLoading && !formLoc && locationCode) setFormLoc(locationCode)
+  }, [locationLoading, locationCode, formLoc])
+
+  // Cajeros: local SIEMPRE fijo al suyo, aunque el rol cargue después de que el
+  // formulario ya arrancó con el local por defecto
+  const { role, locationCode: roleLocationCode } = useRole()
+  const esCajero = role === 'cajero' && !!roleLocationCode
+  useEffect(() => {
+    if (esCajero && formLoc !== roleLocationCode) setFormLoc(roleLocationCode)
+  }, [esCajero, roleLocationCode, formLoc])
 
   // Lógica IVA según tipo de documento
   // - factura: usuario ingresa monto NETO → amount_net = amount; total = amount * 1.19. IVA recuperable (crédito fiscal).
@@ -63,7 +87,7 @@ export default function NuevoGasto() {
     e.preventDefault()
     setErrorMsg('')
 
-    if (!locationId) {
+    if (!formLocId) {
       setErrorMsg('Debes seleccionar un local específico (SF o LA) para registrar gastos.')
       return
     }
@@ -71,7 +95,7 @@ export default function NuevoGasto() {
     setLoading(true)
 
     const { error } = await supabase.from('operating_expenses').insert({
-      location_id: locationId,
+      location_id: formLocId,
       category_id: categoryId || null,
       supplier: supplier || null,
       description: description || null,
@@ -108,9 +132,26 @@ export default function NuevoGasto() {
             </Link>
             <h1 className="text-2xl font-bold text-white">📝 Nuevo Gasto</h1>
           </div>
-          <span className="bg-orange-500 text-white text-sm font-bold px-3 py-1 rounded-lg">
-            {locationCode}
-          </span>
+          {esCajero ? (
+            <span className="bg-orange-500 text-white text-sm font-bold px-3 py-1.5 rounded-lg">
+              {LOCATION_NAMES[formLoc] || formLoc}
+            </span>
+          ) : (
+            <div className="flex rounded-lg overflow-hidden border border-gray-700">
+              {['SF', 'LA'].map(code => (
+                <button
+                  key={code}
+                  type="button"
+                  onClick={() => setFormLoc(code)}
+                  className={`px-3 py-1.5 text-sm font-bold transition ${
+                    formLoc === code ? 'bg-orange-500 text-white' : 'bg-gray-900 text-gray-500 hover:text-gray-300'
+                  }`}
+                >
+                  {LOCATION_NAMES[code]}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {success && (
@@ -258,10 +299,10 @@ export default function NuevoGasto() {
 
           <button
             type="submit"
-            disabled={loading || locationLoading}
+            disabled={loading || locationLoading || !formLocId}
             className="bg-orange-500 hover:bg-orange-600 text-white rounded-xl p-3 font-semibold transition disabled:opacity-50"
           >
-            {loading ? 'Guardando...' : 'Registrar gasto'}
+            {loading ? 'Guardando...' : `Registrar gasto en ${LOCATION_NAMES[formLoc] || '...'}`}
           </button>
         </form>
 
