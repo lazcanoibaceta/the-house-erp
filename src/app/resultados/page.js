@@ -9,6 +9,10 @@ import RoleGuard from '@/components/RoleGuard'
 const supabase = createClient()
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
 
+// Categorías de gasto operativo que se comportan como costo VARIABLE (suben/bajan con las ventas).
+// El resto se trata como fijo. Usado para el punto de equilibrio.
+const VARIABLE_CATEGORIES = new Set(['Comisiones', 'Delivery', 'Transporte', 'Gas licuado'])
+
 // ── Helpers de color ───────────────────────────────────────────────────────────
 function colorPct(v, thresholds) {
   if (v == null) return 'text-gray-500'
@@ -20,6 +24,12 @@ function colorResultado(v) {
   if (v == null) return 'text-gray-500'
   if (v >= 15) return 'text-green-400'
   if (v >= 5)  return 'text-yellow-400'
+  return 'text-red-400'
+}
+function colorMargen(v) {
+  if (v == null) return 'text-gray-500'
+  if (v >= 25) return 'text-green-400'
+  if (v >= 15) return 'text-yellow-400'
   return 'text-red-400'
 }
 function fmt(n) {
@@ -69,17 +79,22 @@ export default function Resultados() {
     const [year, month] = mesKey.split('-').map(Number)
     const locsToCalc = loc === 'AMBOS' ? ['SF', 'LA'] : [loc]
 
+    // Mapa category_id → nombre, para separar gastos variables de fijos
+    const { data: cats } = await supabase.from('expense_categories').select('id, name')
+    const catName = {}
+    for (const c of cats || []) catName[c.id] = c.name
+
     const result = {}
     await Promise.all(
       locsToCalc.map(async code => {
-        result[code] = await calcularLocal(locIds[code], year, month)
+        result[code] = await calcularLocal(locIds[code], year, month, catName)
       })
     )
     setDatos(result)
     setLoading(false)
   }
 
-  async function calcularLocal(locId, year, month) {
+  async function calcularLocal(locId, year, month, catName = {}) {
     if (!locId) return { error: 'Local sin configurar.' }
 
     const desde   = `${year}-${String(month).padStart(2, '0')}-01`
@@ -89,7 +104,7 @@ export default function Resultados() {
     // Ventas + ticket + descuentos
     const { data: ventasData } = await supabase
       .from('sales_periods')
-      .select('total_sales, total_orders, total_discounts, packaging_cost')
+      .select('total_sales, total_orders, total_discounts, packaging_cost, delivery_sales')
       .eq('location_id', locId)
       .gte('period_start', desde)
       .lte('period_start', hasta)
@@ -99,8 +114,10 @@ export default function Resultados() {
     const totalOrders    = (ventasData || []).reduce((s, v) => s + parseInt(v.total_orders  || 0), 0)
     const totalDiscounts = (ventasData || []).reduce((s, v) => s + parseFloat(v.total_discounts || 0), 0)
     const packagingTotal = (ventasData || []).reduce((s, v) => s + parseFloat(v.packaging_cost || 0), 0)
+    const deliverySales  = (ventasData || []).reduce((s, v) => s + parseFloat(v.delivery_sales || 0), 0)
     const avgTicket      = totalOrders > 0 ? totalSales / totalOrders : null
     const discountPct    = totalSales  > 0 ? (totalDiscounts / totalSales) * 100 : null
+    const deliveryPct    = totalSales  > 0 ? (deliverySales / totalSales) * 100 : null
 
     // Food Cost del mes
     const fc = await getFoodCostForMonth(locId, year, month, supabase)
@@ -116,19 +133,26 @@ export default function Resultados() {
 
     const laborAmount = laborData ? parseFloat(laborData.amount) : null
 
-    // Gastos operativos del mes
+    // Gastos operativos del mes (separados en variable/fijo para el punto de equilibrio)
     const { data: gastosData } = await supabase
       .from('operating_expenses')
-      .select('amount_net')
+      .select('amount_net, category_id')
       .eq('location_id', locId)
       .gte('expense_date', desde)
       .lte('expense_date', hasta)
 
-    const gastosTotal = gastosData && gastosData.length > 0
-      ? gastosData.reduce((s, g) => s + parseFloat(g.amount_net || 0), 0)
-      : null
+    let gastosTotal = null, gastosVariable = 0, gastosFijo = 0
+    if (gastosData && gastosData.length > 0) {
+      gastosTotal = 0
+      for (const g of gastosData) {
+        const monto = parseFloat(g.amount_net || 0)
+        gastosTotal += monto
+        if (VARIABLE_CATEGORIES.has(catName[g.category_id])) gastosVariable += monto
+        else gastosFijo += monto
+      }
+    }
 
-    return { ventasNetas, totalSales, totalOrders, totalDiscounts, packagingTotal, avgTicket, discountPct, fc, laborAmount, gastosTotal, year, month }
+    return { ventasNetas, totalSales, totalOrders, totalDiscounts, packagingTotal, deliverySales, deliveryPct, avgTicket, discountPct, fc, laborAmount, gastosTotal, gastosVariable, gastosFijo, year, month }
   }
 
   // ── Helpers de presentación ──────────────────────────────────────────────────
@@ -155,13 +179,17 @@ export default function Resultados() {
       ? (sf?.laborAmount || 0) + (la?.laborAmount || 0) : null
     const gastos  = sf?.gastosTotal != null || la?.gastosTotal != null
       ? (sf?.gastosTotal || 0) + (la?.gastosTotal || 0) : null
+    const gastosVariable = (sf?.gastosVariable || 0) + (la?.gastosVariable || 0)
+    const gastosFijo     = (sf?.gastosFijo     || 0) + (la?.gastosFijo     || 0)
+    const deliverySales  = (sf?.deliverySales  || 0) + (la?.deliverySales  || 0)
+    const deliveryPct    = totalSales > 0 ? (deliverySales / totalSales) * 100 : null
     const fcError = !sf?.fc?.ok ? sf?.fc?.error : !la?.fc?.ok ? la?.fc?.error : null
 
     return {
       ventasNetas: ventas, totalSales, totalOrders, totalDiscounts: totalDisc, avgTicket, discountPct,
-      packagingTotal: packaging,
+      packagingTotal: packaging, deliverySales, deliveryPct,
       fc: fcOk ? { ok: true, costoMercaderia: fcCosto, value: fcValue } : { ok: false, error: fcError },
-      laborAmount: labor, gastosTotal: gastos,
+      laborAmount: labor, gastosTotal: gastos, gastosVariable, gastosFijo,
     }
   }
 
@@ -175,7 +203,7 @@ export default function Resultados() {
   // Resumen P&L + KPIs
   const resumen = (() => {
     if (!datosVista) return null
-    const { ventasNetas, fc, laborAmount, gastosTotal, packagingTotal, avgTicket, discountPct, totalOrders } = datosVista
+    const { ventasNetas, fc, laborAmount, gastosTotal, gastosVariable, gastosFijo, packagingTotal, avgTicket, discountPct, deliveryPct, totalOrders } = datosVista
     if (!ventasNetas) return null
 
     const fcMonto        = fc?.ok ? fc.costoMercaderia : null
@@ -187,8 +215,22 @@ export default function Resultados() {
     const resultado  = ventasNetas - (fcMonto || 0) - packagingMonto - (laborAmount || 0) - (gastosTotal || 0)
     const allPresent = fcMonto != null && laborAmount != null && gastosTotal != null
 
+    // ── Punto de equilibrio ──
+    // Variables: food cost + packaging + gastos variables (comisiones, gas, delivery)
+    // Fijos: labor + gastos fijos (arriendo, luz, agua, etc.)
+    let breakEven = null, cmRatio = null, margenSeguridad = null
+    if (allPresent && ventasNetas > 0) {
+      const costoVariable = fcMonto + packagingMonto + (gastosVariable || 0)
+      const costoFijo     = laborAmount + (gastosFijo || 0)
+      cmRatio = 1 - costoVariable / ventasNetas
+      if (cmRatio > 0) {
+        breakEven = costoFijo / cmRatio
+        margenSeguridad = ((ventasNetas - breakEven) / ventasNetas) * 100
+      }
+    }
+
     return {
-      ventasNetas, fcMonto, totalOrders, avgTicket, discountPct,
+      ventasNetas, fcMonto, totalOrders, avgTicket, discountPct, deliveryPct,
       fcPct:     fc?.ok  ? fc.value   : null,
       fcError:  !fc?.ok  ? fc?.error  : null,
       fcDesde:   fc?.ok  ? fc.desde   : null,
@@ -197,10 +239,46 @@ export default function Resultados() {
       packagingPct: ventasNetas > 0 ? (packagingMonto / ventasNetas) * 100 : 0,
       laborAmount, laborPct, primeCost,
       gastosPct: gastosTotal != null ? (gastosTotal / ventasNetas) * 100 : null,
+      gastosVariablePct: gastosVariable != null ? (gastosVariable / ventasNetas) * 100 : null,
+      gastosFijoPct:     gastosFijo != null ? (gastosFijo / ventasNetas) * 100 : null,
+      breakEven, cmRatio, margenSeguridad,
       resultado:    allPresent ? resultado : null,
       resultadoPct: allPresent ? (resultado / ventasNetas) * 100 : null,
       allPresent,
     }
+  })()
+
+  // Días del mes seleccionado (para break-even diario)
+  const diasMes = mesKey ? (() => { const [y, m] = mesKey.split('-').map(Number); return new Date(y, m, 0).getDate() })() : 30
+
+  // ── Análisis rápido: genera insights automáticos según umbrales ──
+  const analisis = (() => {
+    if (!resumen) return []
+    const r = resumen
+    const items = []
+    if (r.fcPct != null && r.fcPct > 32) {
+      const exceso = ((r.fcPct - 32) / 100) * r.ventasNetas
+      items.push({ sev: r.fcPct > 38 ? 'bad' : 'warn', txt: `Food cost en ${r.fcPct.toFixed(1)}% (meta ≤32%). Bajarlo a la meta libera ~${fmt(exceso)}/mes.` })
+    }
+    if (r.primeCost != null && r.primeCost > 60) {
+      items.push({ sev: r.primeCost > 68 ? 'bad' : 'warn', txt: `Prime cost ${r.primeCost.toFixed(1)}% sobre la meta de 60% (food + labor).` })
+    }
+    if (r.margenSeguridad != null && r.margenSeguridad < 20) {
+      items.push({ sev: r.margenSeguridad < 10 ? 'bad' : 'warn', txt: `Margen de seguridad ${r.margenSeguridad.toFixed(0)}%: colchón ${r.margenSeguridad < 10 ? 'crítico' : 'bajo'} sobre el punto de equilibrio.` })
+    }
+    if (r.gastosPct != null && r.gastosPct > 15) {
+      items.push({ sev: r.gastosPct > 22 ? 'bad' : 'warn', txt: `Gastos operativos en ${r.gastosPct.toFixed(1)}% de las ventas (meta ≤15%).` })
+    }
+    if (r.deliveryPct != null && r.deliveryPct > 55) {
+      items.push({ sev: 'info', txt: `Delivery ${r.deliveryPct.toFixed(0)}% de las ventas: ojo con las comisiones que restan margen.` })
+    }
+    if (r.discountPct != null && r.discountPct > 6) {
+      items.push({ sev: 'warn', txt: `Descuentos ${r.discountPct.toFixed(1)}% (meta ≤6%).` })
+    }
+    if (items.length === 0 && r.allPresent) {
+      items.push({ sev: 'good', txt: 'Local sano: todos los indicadores dentro de meta. 🎉' })
+    }
+    return items
   })()
 
   return (
@@ -328,6 +406,41 @@ export default function Resultados() {
               </div>
             </div>
 
+            {/* Punto de equilibrio + margen de seguridad */}
+            {resumen.breakEven != null && (
+              <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800 flex flex-col sm:flex-row sm:items-center gap-4">
+                <div className="flex-1">
+                  <p className="text-gray-400 text-xs uppercase tracking-widest mb-1">Punto de equilibrio</p>
+                  <p className="text-3xl font-black text-white">{fmt(resumen.breakEven)}</p>
+                  <p className="text-gray-600 text-xs mt-1">
+                    ventas netas/mes · {fmt(resumen.breakEven / diasMes)}/día · {fmt(resumen.breakEven * 1.19)} con IVA
+                  </p>
+                </div>
+                <div className="sm:border-l sm:border-gray-800 sm:pl-6 shrink-0">
+                  <p className="text-gray-500 text-xs uppercase tracking-wide mb-1">Margen de seguridad</p>
+                  <p className={`text-3xl font-bold ${colorMargen(resumen.margenSeguridad)}`}>
+                    {resumen.margenSeguridad.toFixed(0)}<span className="text-lg ml-0.5">%</span>
+                  </p>
+                  <p className="text-gray-600 text-xs mt-1">caída máx. antes del rojo</p>
+                </div>
+              </div>
+            )}
+
+            {/* Análisis rápido */}
+            {analisis.length > 0 && (
+              <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
+                <p className="text-gray-400 text-xs uppercase tracking-widest mb-3">⚡ Análisis rápido</p>
+                <ul className="space-y-2">
+                  {analisis.map((a, i) => (
+                    <li key={i} className="flex gap-2 text-sm">
+                      <span className="shrink-0">{a.sev === 'good' ? '✅' : a.sev === 'bad' ? '🔴' : a.sev === 'warn' ? '🟡' : 'ℹ️'}</span>
+                      <span className={a.sev === 'bad' ? 'text-red-300' : a.sev === 'warn' ? 'text-yellow-200' : a.sev === 'good' ? 'text-green-300' : 'text-gray-300'}>{a.txt}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
           </div>
         )}
 
@@ -409,6 +522,7 @@ export default function Resultados() {
             ) : (
               <FilaResultado
                 label="Gastos Operativos"
+                sublabel={resumen.gastosVariablePct != null ? `variable ${resumen.gastosVariablePct.toFixed(1)}% · fijo ${resumen.gastosFijoPct.toFixed(1)}%` : null}
                 monto={datosVista.gastosTotal}
                 pctValor={resumen.gastosPct}
                 pctColor={colorPct(resumen.gastosPct, [10, 15])}
