@@ -18,6 +18,41 @@ export default function Merma() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
+  // Asignación de productos sin receta calzada → alias del POS
+  const [products, setProducts] = useState([])
+  const [assignFor, setAssignFor] = useState(null)   // nombre del POS que se está asignando
+  const [assignSel, setAssignSel] = useState([])     // product_ids seleccionados
+  const [assignSaving, setAssignSaving] = useState(false)
+
+  // Cargar productos activos (para el selector de asignación)
+  useEffect(() => {
+    supabase.from('products').select('id, name').eq('active', true).order('name')
+      .then(({ data }) => setProducts(data || []))
+  }, [])
+
+  function abrirAsignar(nombre) {
+    setAssignFor(prev => prev === nombre ? null : nombre)
+    setAssignSel([])
+  }
+
+  function toggleSel(id) {
+    setAssignSel(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+  }
+
+  async function guardarAsignacion() {
+    if (!assignFor || assignSel.length === 0) return
+    setAssignSaving(true)
+    const rows = assignSel.map(product_id => ({ alias_name: assignFor, product_id }))
+    const { error: e } = await supabase
+      .from('product_aliases')
+      .upsert(rows, { onConflict: 'alias_name,product_id', ignoreDuplicates: true })
+    setAssignSaving(false)
+    if (e) { setError('No se pudo guardar la asignación: ' + e.message); return }
+    setAssignFor(null)
+    setAssignSel([])
+    calcular() // recalcula: el nombre ya no debería salir sin calzar
+  }
+
   async function calcular() {
     if (!locationId) return
     setLoading(true)
@@ -202,12 +237,52 @@ export default function Merma() {
                 <h3 className="text-white font-semibold mb-1">Productos vendidos sin receta calzada</h3>
                 <p className="text-gray-500 text-xs mb-3">
                   Estos no entraron al teórico — o no tienen receta, o el nombre no coincide con la carta de Insumos/Recetas.
+                  Si sabes a qué producto corresponde, usa <span className="text-orange-400">Asignar</span> y queda guardado para siempre (este mes y los que vienen).
                 </p>
                 <div className="flex flex-col gap-1">
                   {data.productosSinReceta.slice(0, 25).map((p, i) => (
-                    <div key={i} className="flex justify-between items-center text-sm">
-                      <span className="text-gray-300">{p.name}</span>
-                      <span className="text-gray-500">{p.units} u.</span>
+                    <div key={i} className="border-b border-gray-800/60 last:border-0 py-1.5">
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-gray-300">{p.name}</span>
+                        <div className="flex items-center gap-3">
+                          <span className="text-gray-500">{p.units} u.</span>
+                          <button onClick={() => abrirAsignar(p.name)}
+                            className="text-xs font-semibold text-orange-400 hover:text-orange-300 transition">
+                            {assignFor === p.name ? 'Cerrar' : 'Asignar'}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Selector de producto(s) para este nombre del POS */}
+                      {assignFor === p.name && (
+                        <div className="mt-2 bg-gray-800/50 rounded-xl p-3 border border-gray-700">
+                          <p className="text-gray-400 text-xs mb-2">
+                            ¿A qué producto corresponde <span className="text-white">«{p.name}»</span>?
+                            Marca varios si es un combo (ej: Promo = 3 productos).
+                          </p>
+                          <div className="max-h-56 overflow-y-auto flex flex-col gap-0.5 mb-3">
+                            {products.map(prod => (
+                              <label key={prod.id}
+                                className="flex items-center gap-2 text-sm text-gray-300 hover:bg-gray-700/40 rounded px-2 py-1 cursor-pointer">
+                                <input type="checkbox" checked={assignSel.includes(prod.id)}
+                                  onChange={() => toggleSel(prod.id)}
+                                  className="accent-orange-500" />
+                                {prod.name}
+                              </label>
+                            ))}
+                          </div>
+                          <div className="flex gap-2">
+                            <button onClick={guardarAsignacion} disabled={assignSaving || assignSel.length === 0}
+                              className="bg-orange-500 hover:bg-orange-600 text-white text-sm rounded-lg px-4 py-1.5 font-semibold transition disabled:opacity-40">
+                              {assignSaving ? 'Guardando…' : `Guardar${assignSel.length > 1 ? ` (${assignSel.length})` : ''}`}
+                            </button>
+                            <button onClick={() => setAssignFor(null)}
+                              className="text-gray-400 hover:text-gray-200 text-sm px-3 py-1.5 transition">
+                              Cancelar
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

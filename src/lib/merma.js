@@ -23,6 +23,7 @@ function normalize(s) {
     .toString()
     .toLowerCase()
     .normalize('NFD').replace(/[̀-ͯ]/g, '') // saca acentos
+    .replace(/-/g, '')                         // saca guiones ("Coca-Cola" → "cocacola")
     .replace(/\s+/g, ' ')
     .trim()
 }
@@ -162,17 +163,29 @@ export async function getMermaForMonth(locId, year, month, supabase) {
   const ventasNetas = (ventasData || []).reduce((s, v) => s + parseFloat(v.total_sales), 0) / 1.19
 
   // ── 4. Recetas + productos para el consumo teórico ─────────────────────────
-  const [{ data: products }, { data: recipes }, { data: insumos }, { data: costs }] =
+  const [{ data: products }, { data: recipes }, { data: insumos }, { data: costs }, { data: aliases }] =
     await Promise.all([
       supabase.from('products').select('id, name').eq('active', true),
       supabase.from('recipes').select('product_id, insumo_id, quantity'),
       supabase.from('insumos').select('id, name, unit'),
       supabase.from('insumo_costs').select('insumo_id, avg_cost').eq('location_id', locId),
+      // Puente nombre-del-POS → producto (tabla product_aliases, migración 008).
+      // Si la tabla aún no existe, Supabase devuelve data:null y seguimos sin alias.
+      supabase.from('product_aliases').select('alias_name, product_id'),
     ])
 
   // Mapa nombre normalizado → product_id
   const nombreAProductId = {}
   for (const p of (products || [])) nombreAProductId[normalize(p.name)] = p.id
+
+  // Mapa alias normalizado → [product_id, ...] (un nombre del POS puede mapear a
+  // varios productos: ej. "promo futbolera" = Classic + Bacon Rings + Chicken Pop)
+  const aliasMap = {}
+  for (const a of (aliases || [])) {
+    const k = normalize(a.alias_name)
+    if (!aliasMap[k]) aliasMap[k] = []
+    aliasMap[k].push(a.product_id)
+  }
 
   // Recetas agrupadas por producto
   const recetasPorProducto = {}
@@ -187,20 +200,33 @@ export async function getMermaForMonth(locId, year, month, supabase) {
   const productosSinReceta = [] // { name, units } no calzaron o no tienen receta
 
   for (const [nombreNorm, unidades] of Object.entries(unidadesPorProducto)) {
-    // Justo agrega "Burger" al nombre ("Cheese Burger") pero en products se
-    // llama sin esa palabra ("Cheese") → segundo intento sin el sufijo
+    // Resolver a qué producto(s) corresponde este nombre del POS:
+    //  1. Match directo con products.name
+    //  2. Justo agrega "Burger" al nombre ("Cheese Burger") pero en products se
+    //     llama sin esa palabra ("Cheese") → segundo intento sin el sufijo
+    //  3. Alias del POS (tabla product_aliases): puede mapear a 1 o varios
+    //     productos (combos como la Promo Futbolera)
+    let productIds = []
     let productId = nombreAProductId[nombreNorm]
     if (!productId && nombreNorm.endsWith(' burger')) {
       productId = nombreAProductId[nombreNorm.replace(/ burger$/, '')]
     }
-    const receta = productId ? recetasPorProducto[productId] : null
-    if (!receta || receta.length === 0) {
+    if (productId) productIds = [productId]
+    else if (aliasMap[nombreNorm]) productIds = aliasMap[nombreNorm]
+
+    // Recetas de todos los productos calzados (un combo suma varias)
+    const recetas = productIds
+      .map(id => recetasPorProducto[id])
+      .filter(r => r && r.length > 0)
+    if (recetas.length === 0) {
       productosSinReceta.push({ name: nombreNorm, units: unidades })
       continue
     }
     unidadesCubiertas += unidades
-    for (const r of receta) {
-      addExploded(teorico, r.insumo_id, unidades * parseFloat(r.quantity), subMap)
+    for (const receta of recetas) {
+      for (const r of receta) {
+        addExploded(teorico, r.insumo_id, unidades * parseFloat(r.quantity), subMap)
+      }
     }
   }
 
