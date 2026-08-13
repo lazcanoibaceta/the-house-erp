@@ -495,16 +495,20 @@ export default function Ventas() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <p className="text-gray-400 text-xs mb-1">🏆 Mejor día</p>
-                  <p className="text-green-400 font-bold">${data.periodo.best_day_amount.toLocaleString('es-CL')}</p>
+                  <p className="text-green-400 font-bold">{data.periodo.best_day_amount != null ? '$' + data.periodo.best_day_amount.toLocaleString('es-CL') : '—'}</p>
                   <p className="text-gray-500 text-xs mt-1">
-                    {new Date(data.periodo.best_day_date + 'T12:00:00').toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' })}
+                    {data.periodo.best_day_date
+                      ? new Date(data.periodo.best_day_date + 'T12:00:00').toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' })
+                      : 'sin dato'}
                   </p>
                 </div>
                 <div>
                   <p className="text-gray-400 text-xs mb-1">📉 Peor día</p>
-                  <p className="text-red-400 font-bold">${data.periodo.worst_day_amount.toLocaleString('es-CL')}</p>
+                  <p className="text-red-400 font-bold">{data.periodo.worst_day_amount != null ? '$' + data.periodo.worst_day_amount.toLocaleString('es-CL') : '—'}</p>
                   <p className="text-gray-500 text-xs mt-1">
-                    {new Date(data.periodo.worst_day_date + 'T12:00:00').toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' })}
+                    {data.periodo.worst_day_date
+                      ? new Date(data.periodo.worst_day_date + 'T12:00:00').toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' })
+                      : 'sin dato'}
                   </p>
                 </div>
               </div>
