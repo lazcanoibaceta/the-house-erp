@@ -40,6 +40,7 @@ const SECTIONS = [
     links: [
       { href: '/resultados',          label: 'Resultados' },
       { href: '/ventas',              label: 'Ventas' },
+      { href: '/proyeccion',          label: 'Proyección y objetivos' },
       { href: '/inventario/costeo',   label: 'Costeo' },
       { href: '/inventario/merma',    label: 'Merma' },
       { href: '/compras',             label: 'Compras' },
