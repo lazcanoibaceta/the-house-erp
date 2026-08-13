@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase'
 import { useLocation } from '@/hooks/useLocation'
 import { useRole } from '@/hooks/useRole'
 import DateInput from '@/components/DateInput'
+import PaymentStatusFields from '@/components/PaymentStatusFields'
 import Link from 'next/link'
 
 const supabase = createClient()
@@ -25,6 +26,8 @@ export default function NuevaCompra() {
   const [supplierId, setSupplierId] = useState('')
   const [date, setDate]             = useState(new Date().toISOString().split('T')[0])
   const [items, setItems]           = useState([{ insumo_id: '', quantity: '', total_price: '' }])
+  const [paymentStatus, setPaymentStatus] = useState('pagado')
+  const [dueDate, setDueDate]       = useState('')
   const [loading, setLoading]       = useState(false)
   const [success, setSuccess]       = useState(false)
 
@@ -100,7 +103,15 @@ export default function NuevaCompra() {
     const total = getTotal()
     const { data: purchase, error } = await supabase
       .from('purchases')
-      .insert({ supplier_id: supplierId, date, total, location_id: formLocId })
+      .insert({
+        supplier_id: supplierId,
+        date,
+        total,
+        location_id: formLocId,
+        payment_status: paymentStatus,
+        due_date: paymentStatus === 'por_pagar' ? (dueDate || null) : null,
+        paid_date: paymentStatus === 'pagado' ? date : null,
+      })
       .select().single()
     if (error) { console.error(error); setLoading(false); return }
 
@@ -125,6 +136,8 @@ export default function NuevaCompra() {
     setSuccess(true)
     setItems([{ insumo_id: '', quantity: '', total_price: '' }])
     setSupplierId('')
+    setPaymentStatus('pagado')
+    setDueDate('')
     setLoading(false)
     setTimeout(() => setSuccess(false), 3000)
   }
@@ -222,6 +235,13 @@ export default function NuevaCompra() {
             <span className="font-semibold text-white">Total factura</span>
             <span className="text-xl font-bold text-white">${getTotal().toLocaleString('es-CL')}</span>
           </div>
+
+          <PaymentStatusFields
+            status={paymentStatus}
+            onStatusChange={setPaymentStatus}
+            dueDate={dueDate}
+            onDueDateChange={setDueDate}
+          />
 
           <button type="submit" disabled={loading || !formLocId} className="bg-orange-500 hover:bg-orange-600 text-white rounded-xl p-3 font-semibold transition disabled:opacity-50">
             {loading ? 'Guardando...' : `Registrar compra en ${LOCATION_NAMES[formLoc] || '...'}`}

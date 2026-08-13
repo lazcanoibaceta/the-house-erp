@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase'
 import { useLocation } from '@/hooks/useLocation'
 import { useRole } from '@/hooks/useRole'
 import DateInput from '@/components/DateInput'
+import PaymentStatusFields from '@/components/PaymentStatusFields'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 
@@ -37,6 +38,8 @@ export default function NuevoGasto() {
   const [amount, setAmount] = useState('')         // lo que escribe el usuario
   const [paymentMethod, setPaymentMethod] = useState('transferencia')
   const [expenseDate, setExpenseDate] = useState(new Date().toISOString().split('T')[0])
+  const [paymentStatus, setPaymentStatus] = useState('pagado')
+  const [dueDate, setDueDate] = useState('')
   const [notes, setNotes] = useState('')
 
   useEffect(() => {
@@ -106,6 +109,9 @@ export default function NuevoGasto() {
       document_number: documentNumber || null,
       expense_date: expenseDate,
       payment_method: paymentMethod,
+      payment_status: paymentStatus,
+      due_date: paymentStatus === 'por_pagar' ? (dueDate || null) : null,
+      paid_date: paymentStatus === 'pagado' ? expenseDate : null,
       notes: notes || null,
     })
 
@@ -284,6 +290,14 @@ export default function NuevoGasto() {
               </div>
             )}
           </div>
+
+          {/* Estado de pago */}
+          <PaymentStatusFields
+            status={paymentStatus}
+            onStatusChange={setPaymentStatus}
+            dueDate={dueDate}
+            onDueDateChange={setDueDate}
+          />
 
           {/* Notas */}
           <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800">

@@ -44,6 +44,7 @@ const SECTIONS = [
       { href: '/inventario/merma',    label: 'Merma' },
       { href: '/compras',             label: 'Compras' },
       { href: '/gastos',              label: 'Gastos' },
+      { href: '/pendientes',          label: 'Pendientes de pago' },
       { href: '/inventario/conteos',  label: 'Conteos' },
     ],
   },
