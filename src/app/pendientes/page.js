@@ -40,6 +40,8 @@ export default function PendientesPage() {
   const [pasivos, setPasivos]     = useState([])   // liabilities por pagar
   const [loading, setLoading]     = useState(true)
   const [pagandoId, setPagandoId] = useState(null)
+  const [abonandoId, setAbonandoId] = useState(null)  // id del pasivo con el form de abono abierto
+  const [montoAbono, setMontoAbono] = useState('')
 
   useEffect(() => { cargar() }, [])
 
@@ -101,13 +103,43 @@ export default function PendientesPage() {
     setCuentas(prev => prev.filter(c => c.key !== item.key))
   }
 
-  async function marcarPasivoPagado(l) {
-    const ok = window.confirm(`¿Marcar este pasivo como pagado?\n\n${l.creditor}\n${fmt(l.amount)}\n\nDesaparecerá de la lista.`)
+  // Paga un pasivo, total o parcialmente. Registra el abono con su fecha,
+  // baja el saldo (liabilities.amount) y, si llega a 0, lo marca pagado y lo
+  // saca de la lista. Si queda saldo, se mantiene con lo que falta.
+  async function pagarPasivo(l, montoRaw) {
+    const saldo = parseFloat(l.amount || 0)
+    const monto = Math.round(parseFloat(montoRaw) || 0)
+    if (!(monto > 0)) { alert('Ingresa un monto mayor a 0.'); return }
+    if (monto > saldo) { alert(`El abono ($${monto.toLocaleString('es-CL')}) no puede superar el saldo (${fmt(saldo)}).`); return }
+
+    const nuevoSaldo = saldo - monto
+    const quedaSaldado = nuevoSaldo <= 0
+    const ok = window.confirm(
+      quedaSaldado
+        ? `¿Pagar el total de ${l.creditor}?\n\n${fmt(monto)}\n\nDesaparecerá de la lista.`
+        : `¿Registrar abono a ${l.creditor}?\n\nAbono: ${fmt(monto)}\nSaldo restante: ${fmt(nuevoSaldo)}`
+    )
     if (!ok) return
+
     setPagandoId('pasivo-' + l.id)
-    await supabase.from('liabilities').update({ status: 'pagado', paid_date: hoyISO(), updated_at: new Date().toISOString() }).eq('id', l.id)
+    // 1. Registrar el abono (historial + flujo de caja)
+    await supabase.from('liability_payments').insert({ liability_id: l.id, amount: monto, paid_date: hoyISO() })
+    // 2. Actualizar el saldo del pasivo
+    await supabase.from('liabilities').update({
+      amount:    quedaSaldado ? 0 : nuevoSaldo,
+      status:    quedaSaldado ? 'pagado' : 'por_pagar',
+      paid_date: quedaSaldado ? hoyISO() : null,
+      updated_at: new Date().toISOString(),
+    }).eq('id', l.id)
+
     setPagandoId(null)
-    setPasivos(prev => prev.filter(p => p.id !== l.id))
+    setAbonandoId(null)
+    setMontoAbono('')
+    if (quedaSaldado) {
+      setPasivos(prev => prev.filter(p => p.id !== l.id))
+    } else {
+      setPasivos(prev => prev.map(p => p.id === l.id ? { ...p, amount: nuevoSaldo } : p))
+    }
   }
 
   const totalCuentas = cuentas.reduce((s, c) => s + c.amount, 0)
@@ -206,31 +238,78 @@ export default function PendientesPage() {
                     <p className="text-gray-500 text-sm">No hay créditos grandes pendientes.</p>
                   </div>
                 ) : (
-                  pasivos.map(l => (
-                    <div key={l.id} className={`bg-gray-900 rounded-2xl p-4 border ${l.is_overdue ? 'border-red-500/40' : 'border-gray-800'} flex items-center justify-between gap-3`}>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <p className="text-white font-semibold truncate">{l.creditor}</p>
-                          {l.is_overdue && <span className="bg-red-500/20 text-red-400 text-xs px-1.5 py-0.5 rounded shrink-0">Vencido</span>}
+                  pasivos.map(l => {
+                    const orig = parseFloat(l.original_amount || l.amount)
+                    const abonado = orig - parseFloat(l.amount || 0)
+                    const procesando = pagandoId === 'pasivo-' + l.id
+                    return (
+                      <div key={l.id} className={`bg-gray-900 rounded-2xl p-4 border ${l.is_overdue ? 'border-red-500/40' : 'border-gray-800'} flex flex-col gap-3`}>
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <p className="text-white font-semibold truncate">{l.creditor}</p>
+                              {l.is_overdue && <span className="bg-red-500/20 text-red-400 text-xs px-1.5 py-0.5 rounded shrink-0">Vencido</span>}
+                            </div>
+                            <p className="text-gray-500 text-xs mt-0.5">
+                              {KIND_LABELS[l.kind] || l.kind}
+                              {l.due_date && <> · vence {fmtFecha(l.due_date)}</>}
+                            </p>
+                            {abonado > 0 && (
+                              <p className="text-green-500/80 text-xs mt-1">Abonado {fmt(abonado)} de {fmt(orig)}</p>
+                            )}
+                            {l.notes && <p className="text-gray-600 text-xs mt-1 italic">{l.notes}</p>}
+                          </div>
+                          <div className="text-right shrink-0">
+                            <span className="text-white font-bold block">{fmt(l.amount)}</span>
+                            <span className="text-gray-600 text-xs">saldo</span>
+                          </div>
                         </div>
-                        <p className="text-gray-500 text-xs mt-0.5">
-                          {KIND_LABELS[l.kind] || l.kind}
-                          {l.due_date && <> · vence {fmtFecha(l.due_date)}</>}
-                        </p>
-                        {l.notes && <p className="text-gray-600 text-xs mt-1 italic">{l.notes}</p>}
+
+                        {abonandoId === l.id ? (
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="number"
+                              autoFocus
+                              value={montoAbono}
+                              onChange={e => setMontoAbono(e.target.value)}
+                              placeholder="Monto del abono $"
+                              className="flex-1 bg-gray-800 border border-gray-700 rounded-lg p-2 text-white text-sm"
+                            />
+                            <button
+                              onClick={() => pagarPasivo(l, montoAbono)}
+                              disabled={procesando}
+                              className="text-xs text-white bg-orange-500 hover:bg-orange-600 rounded-lg px-3 py-2 font-semibold transition disabled:opacity-50"
+                            >
+                              {procesando ? '...' : 'Abonar'}
+                            </button>
+                            <button
+                              onClick={() => { setAbonandoId(null); setMontoAbono('') }}
+                              className="text-xs text-gray-400 hover:text-white px-2 py-2"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex justify-end gap-2">
+                            <button
+                              onClick={() => { setAbonandoId(l.id); setMontoAbono('') }}
+                              disabled={procesando}
+                              className="text-xs text-orange-400 border border-orange-500/30 rounded-lg px-2 py-1 hover:bg-orange-500/10 transition disabled:opacity-50"
+                            >
+                              ＋ Abonar
+                            </button>
+                            <button
+                              onClick={() => pagarPasivo(l, l.amount)}
+                              disabled={procesando}
+                              className="text-xs text-green-400 border border-green-500/30 rounded-lg px-2 py-1 hover:bg-green-500/10 transition disabled:opacity-50"
+                            >
+                              {procesando ? '...' : '✓ Pagar todo'}
+                            </button>
+                          </div>
+                        )}
                       </div>
-                      <div className="flex flex-col items-end gap-1 shrink-0">
-                        <span className="text-white font-bold">{fmt(l.amount)}</span>
-                        <button
-                          onClick={() => marcarPasivoPagado(l)}
-                          disabled={pagandoId === 'pasivo-' + l.id}
-                          className="text-xs text-green-400 border border-green-500/30 rounded-lg px-2 py-1 hover:bg-green-500/10 transition disabled:opacity-50"
-                        >
-                          {pagandoId === 'pasivo-' + l.id ? '...' : '✓ Pagado'}
-                        </button>
-                      </div>
-                    </div>
-                  ))
+                    )
+                  })
                 )}
               </section>
 
