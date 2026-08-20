@@ -25,6 +25,7 @@ export default function Repartidores() {
   const [archivo, setArchivo] = useState('')
   const [asignaciones, setAsignaciones] = useState({})
   const [inputsAbiertos, setInputsAbiertos] = useState({})
+  const [diasAbiertos, setDiasAbiertos] = useState({})
   const [error, setError] = useState(null)
 
   function procesarExcel(file) {
@@ -87,6 +88,33 @@ export default function Repartidores() {
     setInputsAbiertos(prev => ({ ...prev, [idCuenta]: !prev[idCuenta] }))
   }
 
+  function toggleDia(key) {
+    setDiasAbiertos(prev => ({ ...prev, [key]: !prev[key] }))
+  }
+
+  function renderDetalle(items) {
+    return (
+      <div className="bg-gray-950/50 px-4 pb-2 no-print">
+        {[...items].sort((a, b) => a.time.localeCompare(b.time)).map(it => (
+          <div
+            key={it.id}
+            className="flex items-center justify-between gap-3 py-1.5 border-b border-gray-800/40 last:border-0 text-xs"
+          >
+            <div className="min-w-0 flex items-center gap-2">
+              <span className="text-gray-500 shrink-0">{it.time}</span>
+              <span className="text-gray-300 truncate">{it.client}</span>
+              <span className="text-gray-600 shrink-0">{it.plataforma}</span>
+            </div>
+            <div className="flex items-center gap-3 shrink-0 tabular-nums">
+              <span className="text-gray-400">${it.despacho.toLocaleString('es-CL')}</span>
+              {it.propina > 0 && <span className="text-gray-500">prop ${it.propina.toLocaleString('es-CL')}</span>}
+            </div>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
   if (!datos) {
     return (
       <main className="min-h-screen bg-gray-950 p-4 md:p-8">
@@ -120,31 +148,44 @@ export default function Repartidores() {
   const dias = Object.keys(datos.byDay).sort()
 
   // Construir vista por repartidor
+  function acumular(name, dateKey, row) {
+    const despacho = Number(row['Despacho']) || 0
+    const propina = Number(row['Propina']) || 0
+    if (!byRepartidor[name]) byRepartidor[name] = { despacho: 0, propina: 0, days: {} }
+    if (!byRepartidor[name].days[dateKey]) byRepartidor[name].days[dateKey] = { despacho: 0, propina: 0, orders: 0, items: [] }
+    byRepartidor[name].despacho += despacho
+    byRepartidor[name].propina += propina
+    const dia = byRepartidor[name].days[dateKey]
+    dia.despacho += despacho
+    dia.propina += propina
+    dia.orders++
+    dia.items.push({
+      id: row['Id Cuenta'],
+      time: serialToTime(row['Fecha de creación']),
+      client: row['Cliente'] || 'Sin nombre',
+      plataforma: row['Plataforma'],
+      despacho,
+      propina,
+    })
+  }
+
   const byRepartidor = {}
   for (const dateKey of dias) {
     const dia = datos.byDay[dateKey]
     for (const row of dia.conRepartidor) {
-      const name = row['Repartidor']
-      if (!byRepartidor[name]) byRepartidor[name] = { total: 0, days: {} }
-      if (!byRepartidor[name].days[dateKey]) byRepartidor[name].days[dateKey] = { total: 0, orders: 0 }
-      byRepartidor[name].total += row['Despacho']
-      byRepartidor[name].days[dateKey].total += row['Despacho']
-      byRepartidor[name].days[dateKey].orders++
+      acumular(row['Repartidor'], dateKey, row)
     }
     for (const row of dia.sinRepartidor) {
       const asignado = asignaciones[row['Id Cuenta']]
-      if (asignado) {
-        if (!byRepartidor[asignado]) byRepartidor[asignado] = { total: 0, days: {} }
-        if (!byRepartidor[asignado].days[dateKey]) byRepartidor[asignado].days[dateKey] = { total: 0, orders: 0 }
-        byRepartidor[asignado].total += row['Despacho']
-        byRepartidor[asignado].days[dateKey].total += row['Despacho']
-        byRepartidor[asignado].days[dateKey].orders++
-      }
+      if (asignado) acumular(asignado, dateKey, row)
     }
   }
 
-  const repartidoresOrdenados = Object.entries(byRepartidor).sort((a, b) => b[1].total - a[1].total)
-  const totalGeneral = repartidoresOrdenados.reduce((s, [, d]) => s + d.total, 0)
+  const repartidoresOrdenados = Object.entries(byRepartidor)
+    .sort((a, b) => (b[1].despacho + b[1].propina) - (a[1].despacho + a[1].propina))
+  const totalDespacho = repartidoresOrdenados.reduce((s, [, d]) => s + d.despacho, 0)
+  const totalPropina = repartidoresOrdenados.reduce((s, [, d]) => s + d.propina, 0)
+  const totalGeneral = totalDespacho + totalPropina
 
   const todosSinAsignar = dias.flatMap(d =>
     datos.byDay[d].sinRepartidor.map(r => ({ ...r, _dateKey: d }))
@@ -197,15 +238,30 @@ export default function Repartidores() {
         </div>
 
         {/* Total general — solo impresión */}
-        <div className="hidden print:flex justify-between font-bold text-sm border-b border-black pb-1 mb-3">
-          <span>TOTAL GENERAL</span>
-          <span>${totalGeneral.toLocaleString('es-CL')}</span>
+        <div className="hidden print:block border-b border-black pb-1 mb-3">
+          <div className="flex justify-between text-xs">
+            <span>Despacho</span>
+            <span>${totalDespacho.toLocaleString('es-CL')}</span>
+          </div>
+          <div className="flex justify-between text-xs">
+            <span>Propina</span>
+            <span>${totalPropina.toLocaleString('es-CL')}</span>
+          </div>
+          <div className="flex justify-between font-bold text-sm mt-0.5">
+            <span>TOTAL GENERAL</span>
+            <span>${totalGeneral.toLocaleString('es-CL')}</span>
+          </div>
         </div>
 
         {/* Período — pantalla */}
         <div className="mb-4 no-print">
           <p className="text-orange-400 text-xs uppercase tracking-wide">{periodoLabel}</p>
-          <p className="text-gray-500 text-xs mt-0.5">{repartidoresOrdenados.length} repartidor{repartidoresOrdenados.length !== 1 ? 'es' : ''} · ${totalGeneral.toLocaleString('es-CL')} total</p>
+          <p className="text-gray-500 text-xs mt-0.5">
+            {repartidoresOrdenados.length} repartidor{repartidoresOrdenados.length !== 1 ? 'es' : ''}
+            {' · '}Despacho ${totalDespacho.toLocaleString('es-CL')}
+            {' · '}Propina ${totalPropina.toLocaleString('es-CL')}
+            {' · '}<span className="text-gray-300">Total ${totalGeneral.toLocaleString('es-CL')}</span>
+          </p>
         </div>
 
         {/* Tarjetas por repartidor */}
@@ -215,6 +271,7 @@ export default function Repartidores() {
               const totalOrders = Object.values(data.days).reduce((s, d) => s + d.orders, 0)
               const dayEntries = Object.entries(data.days).sort(([a], [b]) => a.localeCompare(b))
               const multipleDays = dayEntries.length > 1
+              const total = data.despacho + data.propina
 
               return (
                 <div
@@ -238,31 +295,69 @@ export default function Repartidores() {
                       </div>
                     </div>
                     <span className="text-green-400 font-bold text-2xl print:text-black print:text-base print:font-bold">
-                      ${data.total.toLocaleString('es-CL')}
+                      ${total.toLocaleString('es-CL')}
                     </span>
                   </div>
 
-                  {/* Desglose por día (solo si hay más de un día) */}
+                  {/* Desglose despacho + propina */}
+                  <div className="border-t border-gray-800 print:border-t print:border-dashed print:border-gray-400">
+                    <div className="flex items-center justify-between px-4 py-1.5 print:px-2 print:py-0.5">
+                      <span className="text-gray-400 text-sm print:text-gray-700 print:text-xs">Despacho</span>
+                      <span className="text-gray-300 text-sm print:text-black print:text-xs">${data.despacho.toLocaleString('es-CL')}</span>
+                    </div>
+                    <div className="flex items-center justify-between px-4 py-1.5 border-t border-gray-800/50 print:px-2 print:py-0.5 print:border-0">
+                      <span className="text-gray-400 text-sm print:text-gray-700 print:text-xs">Propina</span>
+                      <span className="text-gray-300 text-sm print:text-black print:text-xs">${data.propina.toLocaleString('es-CL')}</span>
+                    </div>
+                  </div>
+
+                  {/* Desglose por día (solo si hay más de un día) — cada día se despliega */}
                   {multipleDays && (
                     <div className="border-t border-gray-800 print:border-t print:border-dashed print:border-gray-400">
-                      {dayEntries.map(([dateKey, dayData]) => (
-                        <div
-                          key={dateKey}
-                          className="flex items-center justify-between px-4 py-2 border-b border-gray-800/50 last:border-0 print:px-2 print:py-0.5 print:border-0"
-                        >
-                          <span className="text-gray-400 text-sm print:text-gray-700 print:text-xs">
-                            {formatDate(dateKey, { weekday: 'short', day: 'numeric', month: 'short' })}
-                            <span className="text-gray-600 ml-2 print:text-gray-500">
-                              {dayData.orders} desp.
-                            </span>
-                          </span>
-                          <span className="text-white text-sm print:text-black print:text-xs">
-                            ${dayData.total.toLocaleString('es-CL')}
-                          </span>
-                        </div>
-                      ))}
+                      {dayEntries.map(([dateKey, dayData]) => {
+                        const key = name + '|' + dateKey
+                        const abierto = diasAbiertos[key]
+                        return (
+                          <div key={dateKey} className="border-b border-gray-800/50 last:border-0 print:border-0">
+                            <button
+                              onClick={() => toggleDia(key)}
+                              className="w-full flex items-center justify-between px-4 py-2 text-left hover:bg-gray-800/40 transition print:px-2 print:py-0.5 print:hover:bg-transparent"
+                            >
+                              <span className="text-gray-400 text-sm print:text-gray-700 print:text-xs flex items-center gap-1.5">
+                                <span className={`text-gray-600 text-[10px] transition-transform no-print ${abierto ? 'rotate-90' : ''}`}>▶</span>
+                                {formatDate(dateKey, { weekday: 'short', day: 'numeric', month: 'short' })}
+                                <span className="text-gray-600 ml-1 print:text-gray-500">
+                                  {dayData.orders} desp.
+                                </span>
+                              </span>
+                              <span className="text-white text-sm print:text-black print:text-xs">
+                                ${(dayData.despacho + dayData.propina).toLocaleString('es-CL')}
+                              </span>
+                            </button>
+                            {abierto && renderDetalle(dayData.items)}
+                          </div>
+                        )
+                      })}
                     </div>
                   )}
+
+                  {/* Un solo día — botón para desplegar el detalle de pedidos */}
+                  {!multipleDays && (() => {
+                    const key = name + '|' + dayEntries[0][0]
+                    const abierto = diasAbiertos[key]
+                    return (
+                      <div className="no-print">
+                        <button
+                          onClick={() => toggleDia(key)}
+                          className="w-full flex items-center gap-1.5 px-4 py-1.5 text-xs text-gray-500 hover:text-gray-300 hover:bg-gray-800/40 border-t border-gray-800/50 transition"
+                        >
+                          <span className={`text-gray-600 text-[10px] transition-transform ${abierto ? 'rotate-90' : ''}`}>▶</span>
+                          {abierto ? 'Ocultar detalle' : 'Ver detalle'}
+                        </button>
+                        {abierto && renderDetalle(dayEntries[0][1].items)}
+                      </div>
+                    )
+                  })()}
                 </div>
               )
             })}
@@ -309,7 +404,12 @@ export default function Repartidores() {
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-yellow-400 font-semibold">${row['Despacho'].toLocaleString('es-CL')}</span>
+                      <div className="flex flex-col items-end leading-tight">
+                        <span className="text-yellow-400 font-semibold">${row['Despacho'].toLocaleString('es-CL')}</span>
+                        {Number(row['Propina']) > 0 && (
+                          <span className="text-gray-500 text-[11px]">+ prop ${Number(row['Propina']).toLocaleString('es-CL')}</span>
+                        )}
+                      </div>
 
                       {asignado ? (
                         <div className="flex items-center gap-1">
