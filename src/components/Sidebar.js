@@ -23,6 +23,7 @@ const SECTIONS = [
     emoji: '📥',
     roles: ['admin_supremo', 'admin', 'cajero'],
     links: [
+      { href: '/pos',               label: 'Venta presencial (Beta)',   roles: ['admin_supremo', 'admin', 'cajero'] },
       { href: '/compras/nuevo',     label: 'Nueva compra',              roles: ['admin_supremo', 'admin', 'cajero'] },
       { href: '/inventario/conteo', label: 'Nuevo conteo',              roles: ['admin_supremo', 'admin', 'cajero'] },
       { href: '/inventario/traspasos', label: 'Traspaso entre locales', roles: ['admin_supremo', 'admin'] },
